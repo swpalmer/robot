@@ -40,6 +40,10 @@
             .url = "git+https://github.com/karlseguin/http.zig?ref=master#8ecf3a330ab1bed8495604d444e549b94f08bc0f",
             .hash = "httpz-0.0.0-PNVzrOy2BgBA2lU1zixuVrv0UUkSnVrBUIlIHl1XV0XV",
         },
+        .websocket = .{
+            .url = "git+https://github.com/karlseguin/websocket.zig?ref=master#10b0e7be2158ff22733f1e59c1ae0bace5bf3a0c",
+            .hash = "websocket-0.1.0-ZPISdbhVAwCL-zrOIFLKLr6CHtwV92raAnObudtbYQjJ",
+        },
     },
     .paths = .{
         "build.zig",

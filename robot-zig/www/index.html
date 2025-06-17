@@ -1,0 +1,65 @@
+<html>
+    <head>
+        <title>ROBOT</title>
+    </head>
+    <body>
+        <h1>Hello!  From the Robot!</h1>
+        <table>
+            <tr><td>Kp</td><td id="curKp">#</td></tr>
+            <tr><td>Ki</td><td id="curKi">#</td></tr>
+            <tr><td>Kd</td><td id="curKd">#</td></tr>
+        </table>
+
+        <h2>PID Parameter Adjustment</h2>
+        <div>
+        <form id="pidFormUpright">
+            <input id="kpFieldUpright" name="Kp" type="number" step="any" value="">
+            <input id="kiFieldUpright" name="Ki" type="number" step="any" value="">
+            <input id="kdFieldUpright" name="Kd" type="number" step="any" value="">
+            <button type="submit" >Update</button>
+        </form>
+        </div>
+        <div>
+        <form id="pidFormFalling">
+            <input id="kpFieldFalling" name="Kp" type="number" step="any" value="">
+            <input id="kiFieldFalling" name="Ki" type="number" step="any" value="">
+            <input id="kdFieldFalling" name="Kd" type="number" step="any" value="">
+            <button type="submit" >Update</button>
+        </form>
+        </div>
+
+        <h2>Speech</h2>
+        <form id="speakForm" onsubmit="sayIt(evt)">
+            <label for="phrase">What should I say? </label>
+            <input id="phrase" name="text" type="text">
+            <button type="submit">Speak</button>
+        </form>
+
+        <script type="text/javascript" src="script.js">
+        </script>
+        <script type="text/javascript">
+            // Initialize the PID values 
+            fetch('/api/pidCurrent', {
+            method: 'GET'})
+            .then(response => response.json())
+            .then(data => {
+                console.log('Success:', data);
+                document.getElementById('curKp').innerText = data.Kp;
+                document.getElementById('curKi').innerText = data.Ki;
+                document.getElementById('curKd').innerText = data.Kd;
+
+                document.getElementById('kpFieldUpright').value = data.upright.Kp;
+                document.getElementById('kiFieldUpright').value = data.upright.Ki;
+                document.getElementById('kdFieldUpright').value = data.upright.Kd;
+
+                document.getElementById('kpFieldFalling').value = data.falling.Kp;
+                document.getElementById('kiFieldFalling').value = data.falling.Ki;
+                document.getElementById('kdFieldFalling').value = data.falling.Kd;
+
+            })
+            .catch(error => {
+                console.error('Error:', error);
+            });
+        </script>
+    </body>
+</html>

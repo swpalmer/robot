@@ -5,10 +5,10 @@ pidFormUpright.addEventListener('submit', function(event) {
     const formData = new FormData(pidFormUpright);
     const data = {};
     formData.forEach((value, key) => {
-        data[key] = value;
+        data[key] = Number(value) || value;
     });
 
-    fetch('/pidUpright', {
+    fetch('/api/pidUpright', {
         method: 'POST',
         headers: {
         'Content-Type': 'application/json'
@@ -31,10 +31,10 @@ pidFormFalling.addEventListener('submit', function(event) {
     const formData = new FormData(pidFormFalling);
     const data = {};
     formData.forEach((value, key) => {
-        data[key] = value;
+        data[key] = Number(value) || value;
     });
 
-    fetch('/pidFalling', {
+    fetch('/api/pidFalling', {
         method: 'POST',
         headers: {
         'Content-Type': 'application/json'
@@ -60,7 +60,7 @@ speakForm.addEventListener('submit', function(event) {
         data[key] = value;
     });
 
-    fetch('/speak', {
+    fetch('/api/speak', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'

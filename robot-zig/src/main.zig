@@ -4,16 +4,44 @@
 
 const std = @import("std");
 /// This imports the separate module containing `robot.zig`. Take a look in `build.zig` for details.
-const lib = @import("robot_zig_lib");
-const httpz = @import("httpz");
+const lib = @import("robot_lib");
+const web = @import("robot_web");
+//const httpz = @import("httpz");
+const tts = @import("speech");
 
+const types = @import("types");
+
+const PIDValues = types.PIDValues;
 const MOTOR_DONT_BOTHER: f32 = 0.0002; // Motor lower than this, not really needing to move at all.
 const MOTOR_MIN: f32 = 0.0004; // to overcome internal friction, etc.
-const MOTOR_MAX: f32 = 0.20; // limiting motor power %
+const MOTOR_MAX: f32 = 0.30; // limiting motor power %
 const SAMPLE_PERIOD_US = 4000; // 4ms
 const SCALE_FACTOR: f32 = 0.0001;
 const MAX_VELOCITY_DELTA: f32 = 0.6;
-const TILT_BIAS: f32 = 3.5; // 3.5° bias to properly balance with current physical config
+const TILT_BIAS: f32 = 3.6; // 3.5° bias to properly balance with current physical config
+
+//var pid = PID{ .kp = 5.0, .ki = 0, .kd = 0.5 };
+// var pid = PID{ .kp = 1.0, .ki = 0, .kd = 1.5 }; flops on the ground
+const PID_Ks = types.PIDValues;
+
+//var pidKs_5 = PID_Ks{ .Kp = 10.0, .Ki = 0.0, .Kd = 5.0 };
+var pid = PID{ .K = .{ .Kp = 15.0, .Ki = 0, .Kd = 2.0 } };
+var pidKs_upright = PID_Ks{ .Kp = 14.5, .Ki = 0.0, .Kd = 6.5 };
+var pidKs_falling = PID_Ks{ .Kp = 115.0, .Ki = 0.0, .Kd = 20.0 };
+
+const stable_threshold = 1.5;
+const upright_threshold = 7.0; // use more agressive correction after tilt of this many degrees
+const falling_threshold = 35.0; // after this we give up and shut off the motors.
+
+var joytick_x: f32 = 0.0; // steering control
+var joytick_y: f32 = 0.0; // throttle control
+
+var angle: f32 = 0.0; // filtered tilt angle
+const alpha: f32 = 0.975;
+var target_angle: f32 = 0.0;
+var prev_gyro_rate_dps: f32 = 0.0;
+var tilt_mode: i8 = 0;
+var last_tilt_mode: i8 = 0;
 
 pub fn main() !void {
     std.debug.print("Robots are cool.\n", .{});
@@ -25,25 +53,40 @@ pub fn main() !void {
     var bw = std.io.bufferedWriter(stdout_file);
     const stdout = bw.writer();
 
-    try stdout.print("Setting up internal web server...\n", .{});
+    try stdout.print("Initializing text-to-speech...\n", .{});
     try bw.flush(); // Don't forget to flush!
+    try tts.init();
+    defer tts.deinit() catch unreachable;
 
-    var server = try webserver();
+    var context = web.WebContext{
+        .pid = &pid.K,
+        .upright = &pidKs_upright,
+        .falling = &pidKs_falling,
+        .flag_ptr = &in_sensor_debug,
+        .x = &joytick_x,
+        .y = &joytick_y,
+    };
+
+    try stdout.print("Setting up internal web server...\n", .{});
+    try bw.flush();
+    // start webserver
+    var server = try web.webserver(&context);
     defer {
         server.stop();
         server.deinit();
+
         // ensure motors are off
         main_drive_motors(0, 0);
     }
 
     try stdout.print("For now, I'm just going to try to stand up straight.\n", .{});
-    try bw.flush(); // Don't forget to flush!
+    try bw.flush();
 
     try lib.initialize();
     defer lib.cleanup();
 
     try stdout.print("\n\n\n", .{});
-    try bw.flush(); // Don't forget to flush!
+    try bw.flush();
 
     while (true) {
         try balance();
@@ -53,77 +96,6 @@ pub fn main() !void {
 
         try sensor_debug_loop();
     }
-}
-
-fn webserver() !httpz.Server(void) {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
-    var server = try httpz.Server(void).init(allocator, .{ .address = "0.0.0.0", .port = 40607 }, {});
-
-    var router = try server.router(.{});
-    router.get("/robot", robotPage, .{});
-    router.post("/pidUpright", postUprightPID, .{});
-    router.post("/pidFalling", postFallingPID, .{});
-    router.post("/speak", postSpeak, .{});
-    //blocks
-    //try server.listen();
-    // non blocking?
-    _ = try server.listenInNewThread();
-    return server;
-}
-
-fn robotPage(req: *httpz.Request, res: *httpz.Response) !void {
-    _ = req;
-    res.status = 200;
-    //try res.json(.{ .id = "Hello", .number = 42 }, .{});
-    res.body = try std.fmt.allocPrint(res.arena, @embedFile("index.html"), .{ @embedFile("script.js"), pid.Kp, pid.Ki, pid.Kd, pidKs_upright.Kp, pidKs_upright.Ki, pidKs_upright.Kd, pidKs_falling.Kp, pidKs_falling.Ki, pidKs_falling.Kd });
-}
-
-const PIDValues = struct { Kp: f32, Ki: f32, Kd: f32 };
-fn postUprightPID(req: *httpz.Request, res: *httpz.Response) !void {
-    //_ = req;
-    res.status = 200;
-
-    if (try req.json(PIDValues)) |requestedPidValues| {
-        // This isn't atomic... perhaps there is a better way... (E.g. copy from a secondary PIDValues object in main the loop)
-        pidKs_upright.Kp = requestedPidValues.Kp;
-        pidKs_upright.Ki = requestedPidValues.Ki;
-        pidKs_upright.Kd = requestedPidValues.Kd;
-    }
-
-    // use this a signal that we can go back to balancing
-    const flag_ptr: *volatile bool = &in_sensor_debug;
-    flag_ptr.* = false;
-
-    try res.json(.{ .Kp = pid.Kp, .Ki = pid.Ki, .Kd = pid.Kd }, .{});
-}
-
-fn postFallingPID(req: *httpz.Request, res: *httpz.Response) !void {
-    //_ = req;
-    res.status = 200;
-
-    if (try req.json(PIDValues)) |requestedPidValues| {
-        // This isn't atomic... perhaps there is a better way... (E.g. copy from a secondary PIDValues object in main the loop)
-        pidKs_falling.Kp = requestedPidValues.Kp;
-        pidKs_falling.Ki = requestedPidValues.Ki;
-        pidKs_falling.Kd = requestedPidValues.Kd;
-    }
-
-    // use this a signal that we can go back to balancing
-    const flag_ptr: *volatile bool = &in_sensor_debug;
-    flag_ptr.* = false;
-
-    try res.json(.{ .Kp = pid.Kp, .Ki = pid.Ki, .Kd = pid.Kd }, .{});
-}
-
-const SpeakParams = struct { text: []u8 };
-
-fn postSpeak(req: *httpz.Request, res: *httpz.Response) !void {
-    res.status = 200;
-    if (try req.json(SpeakParams)) |requestedSpeech| {
-        std.debug.print("Was asked to say: {s}", .{requestedSpeech.text});
-    }
-    try res.json(.{}, .{});
 }
 
 var in_sensor_debug: bool = false;
@@ -142,27 +114,6 @@ fn sensor_debug_loop() !void {
         }
     }
 }
-
-//var pid = PID{ .kp = 5.0, .ki = 0, .kd = 0.5 };
-// var pid = PID{ .kp = 1.0, .ki = 0, .kd = 1.5 }; flops on the ground
-const PID_Ks = struct {
-    Kp: f32 = 0,
-    Ki: f32 = 0,
-    Kd: f32 = 0,
-};
-//var pidKs_5 = PID_Ks{ .Kp = 10.0, .Ki = 0.0, .Kd = 5.0 };
-var pidKs_upright = PID_Ks{ .Kp = 14.5, .Ki = 0.0, .Kd = 4.0 };
-var pidKs_falling = PID_Ks{ .Kp = 100.0, .Ki = 0.0, .Kd = 10.0 };
-const stable_threshold = 1.0;
-const upright_threshold = 8.0; // use more agressive correction after tilt of this many degrees
-const falling_threshold = 35.0; // after this we give up and shut off the motors.
-var pid = PID{ .Kp = 15.0, .Ki = 0, .Kd = 2.0 };
-var angle: f32 = 0.0; // filtered tilt angle
-const alpha: f32 = 0.975;
-var target_angle: f32 = 0.0;
-var prev_gyro_rate_dps: f32 = 0.0;
-var tilt_mode: i8 = 0;
-var last_tilt_mode: i8 = 0;
 
 fn calibrateGyro(samples: usize) f32 {
     var sum: f32 = 0.0;
@@ -217,9 +168,12 @@ fn balance() !void {
         // rate of tilt
         const gyro_rate_dps = lib.orientation().x - gyro_bias; // deg/sec
 
+        const throttle_bias = joytick_y / 30.0;
+        const steering_bias = joytick_x / 100.0;
+
         // Compute angle from accelerometer
         // (pitch or tilt in the yz-plane)
-        const pitch = lib.tilt_angle_yz() + TILT_BIAS;
+        const pitch = lib.tilt_angle_yz() + TILT_BIAS + throttle_bias;
 
         // Complementary filter
         // Weighted average of:
@@ -236,15 +190,30 @@ fn balance() !void {
         const angleAbs = @abs(angle);
         if (angleAbs < upright_threshold) { // minor adjustment
             tilt_mode = if (angleAbs < stable_threshold) 0 else 1;
-            pid.Kp = pidKs_upright.Kp;
-            pid.Ki = pidKs_upright.Ki;
-            pid.Kd = pidKs_upright.Kd;
-        } else if (angleAbs < falling_threshold) { // off balance
 
+            // interpolate PID gains based on angle
+            const ratio = if (tilt_mode == 1)
+                (angleAbs - stable_threshold) / (upright_threshold - stable_threshold)
+            else
+                0.0;
+            pid.K.Kp = pidKs_upright.Kp * (1.0 - ratio) + pidKs_falling.Kp * ratio;
+            pid.K.Ki = pidKs_upright.Ki * (1.0 - ratio) + pidKs_falling.Ki * ratio;
+            pid.K.Kd = pidKs_upright.Kd * (1.0 - ratio) + pidKs_falling.Kd * ratio;
+
+            // pid.K.Kp = pidKs_upright.Kp;
+            // pid.K.Ki = pidKs_upright.Ki;
+            // pid.K.Kd = pidKs_upright.Kd;
+        } else if (angleAbs < falling_threshold) { // off balance
             tilt_mode = 2;
-            pid.Kp = pidKs_falling.Kp;
-            pid.Ki = pidKs_falling.Ki;
-            pid.Kd = pidKs_falling.Kd;
+            // interpolate PID gains based on angle
+            // const ratio = (angleAbs - upright_threshold) / (falling_threshold - upright_threshold);
+            // pid.K.Kp = pidKs_upright.Kp * (1.0 - ratio) + pidKs_falling.Kp * ratio;
+            // pid.K.Ki = pidKs_upright.Ki * (1.0 - ratio) + pidKs_falling.Ki * ratio;
+            // pid.K.Kd = pidKs_upright.Kd * (1.0 - ratio) + pidKs_falling.Kd * ratio;
+
+            pid.K.Kp = pidKs_falling.Kp;
+            pid.K.Ki = pidKs_falling.Ki;
+            pid.K.Kd = pidKs_falling.Kd;
         } else { // too much, don't try to recover, shut off motors
             tilt_mode = 3;
         }
@@ -274,16 +243,17 @@ fn balance() !void {
             motor_power = sign(motor_power) * MOTOR_MIN;
         }
 
+        const steering_power = steering_bias * (4 * MOTOR_MIN + @abs(motor_power) * 0.10); // steering bias is a fraction of motor power
+
         current_motor_power = motor_power;
 
-        // TODO: apply steering control
-        const left_power = motor_power;
-        const right_power = motor_power;
+        const left_power = motor_power + steering_power;
+        const right_power = motor_power - steering_power;
 
         // simulated braking with brief reverse pulse
         const min_drive = 0.002;
         const braking_threshold = 3;
-        const brake_strength = 0.002;
+        const brake_strength = 0.0017;
         if (@abs(motor_power) < min_drive and @abs(gyro_rate_dps) > braking_threshold) {
             // apply short reverse pulse
             const brake_power = -brake_strength * sign(gyro_rate_dps);
@@ -294,7 +264,7 @@ fn balance() !void {
 
         // debug print
         //std.debug.print("Current gyro rate: {d: >7.4}°/s\n", .{gyro_rate_dps});
-        const msg = "{s}𝚫t = {d: >7.6}s,   error = {d: >7.4}, da/dt = {d: >8.4}°/s   P = {d: >8.4},   I = {d: >8.4},   D = {d: >8.4},   output = {d: >7.4}{s}\x1b[39m\n";
+        const msg = "{s}𝚫t = {d: >7.6}s,   error = {d: >7.4}, da/dt = {d: >8.4}°/s   P = {d: >8.4},   I = {d: >8.4},   D = {d: >8.4},   output = {d: >7.4}{s}\x1b[39m\x1b[A\n";
         const text_colour = switch (tilt_mode) {
             0 => "\x1b[32m",
             1 => "\x1b[33m",
@@ -343,9 +313,11 @@ fn limit_rate(current: f32, target: f32, dt: f32) f32 {
 
 // PID stuff
 const PID = struct {
-    Kp: f32 = 0,
-    Ki: f32 = 0, // was 0.01
-    Kd: f32 = 0, // was 0.005
+    K: types.PIDValues,
+    // Kp: f32 = 0,
+    // Ki: f32 = 0, // was 0.01
+    // Kd: f32 = 0, // was 0.005
+
     P: f32 = 0,
     I: f32 = 0,
     D: f32 = 0,
@@ -362,9 +334,9 @@ const PID = struct {
         //const derivative = (tilt_error - self.prev_error) / dt;
         //self.prev_error = tilt_error;
 
-        self.P = self.Kp * tilt_error;
-        self.I = self.Ki * self.integral;
-        self.D = -self.Kd * derivative;
+        self.P = self.K.Kp * tilt_error;
+        self.I = self.K.Ki * self.integral;
+        self.D = -self.K.Kd * derivative;
 
         const output = self.P + self.I + self.D;
 

@@ -1,0 +1,113 @@
+<html>
+<head>
+    <title>ROBOT Control</title>
+    <link rel="stylesheet" type="text/css" href="style.css">
+<style>
+*
+{
+	box-sizing: border-box;
+}
+body
+{
+	margin: 0px;
+	padding: 0px;
+	font-family: monospace;
+}
+.row
+{
+	display: inline-flex;
+	clear: both;
+}
+.columnLateral
+{
+  float: left;
+  width: 15%;
+  min-width: 300px;
+}
+.columnCentre
+{
+  float: left;
+  width: 70%;
+  min-width: 300px;
+}
+#joy2Div
+{
+	width:200px;
+	height:200px;
+	margin:50px
+}
+#joystick
+{
+	border: 1px solid #FF0000;
+}
+#joystick2
+{
+	border: 1px solid #0000FF;
+}
+		</style>
+		<script src="joy.js"></script>
+	</head>
+	<body>
+       <div >
+            <h2>Control JoyStick</h2>
+            <p>Steer the robot with the joystick below. The values will be updated in real-time in the text fields.</p>
+            </p>
+        </div>
+		<div class="row">
+			<div class="columnCentre">
+				<div id="joy1Div" style="width:70vw;height:70vw;margin:50px"></div>
+				Posizione X:<input id="joy1PosizioneX" type="text" /><br />
+				Posizione Y:<input id="joy1PosizioneY" type="text" /><br />
+				Direzione:<input id="joy1Direzione" type="text" /><br />
+				X :<input id="joy1X" type="text" /></br>
+				Y :<input id="joy1Y" type="text" />
+			</div>
+		</div><br />
+    <div class="row">
+        <button id="reset" onclick="reset()" style="font-size: 5vw;">RESET</button>
+    </div>
+		<script type="text/javascript">
+// Create JoyStick object into the DIV 'joy1Div'
+//var Joy1 = new JoyStick('joy1Div');
+
+var joy1IinputPosX = document.getElementById("joy1PosizioneX");
+var joy1InputPosY = document.getElementById("joy1PosizioneY");
+var joy1Direzione = document.getElementById("joy1Direzione");
+var joy1X = document.getElementById("joy1X");
+var joy1Y = document.getElementById("joy1Y");
+
+// Create JoyStick object into the DIV 'joy1Div'
+var Joy1 = new JoyStick('joy1Div', {}, function(stickData) {
+    joy1IinputPosX.value = stickData.xPosition;
+    joy1InputPosY.value = stickData.yPosition;
+    joy1Direzione.value = stickData.cardinalDirection;
+    joy1X.value = stickData.x;
+    joy1Y.value = stickData.y;
+    const data = {};
+    data.x = stickData.x;
+    data.y = stickData.y;
+    fetch('/api/drive', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(data)
+    })
+});
+
+function reset() {
+    fetch('/api/reset', {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        console.log('Reset successful:', data);
+    })
+    .catch(error => {
+        console.error('Error during reset:', error);
+    });
+}
+
+		</script>
+	</body>
+</html>

@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
@@ -8,9 +9,17 @@ pub fn build(b: *std.Build) void {
     // what target to build for. Here we do not override the defaults, which
     // means any target is allowed, and the default is native. Other options
     // for restricting supported target set are available.
-    const target = b.standardTargetOptions(.{
-        .default_target = .{ .cpu_arch = .arm, .os_tag = .linux, .abi = .gnueabihf },
-    });
+
+    //const native_target = b.standardTargetOptions(.{});
+    const cross_compile = true; //native_target.result.isDarwinLibC();
+
+    const target = if (cross_compile)
+        // cross compile
+        b.standardTargetOptions(.{
+            .default_target = .{ .cpu_arch = .aarch64, .os_tag = .linux, .abi = .gnu },
+        })
+    else
+        b.standardTargetOptions(.{});
 
     // Standard optimization options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
@@ -30,6 +39,29 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const web_mod = b.createModule(.{
+        .root_source_file = b.path("src/web.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const speech_mod = b.createModule(.{
+        // `root_source_file` is the Zig "entry point" of the module. If a module
+        // only contains e.g. external object files, you can make this `null`.
+        // In this case the main source file is merely a path, however, in more
+        // complicated build scripts, this could be a generated file.
+        .root_source_file = b.path("src/piper_speech.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    //speech_mod.addSystemIncludePath(b.path("orca/include"));
+    //speech_mod.addLibraryPath(b.path("orca/lib/raspberry-pi/cortex-a53"));
+    speech_mod.addLibraryPath(b.path("orca/lib/raspberry-pi/cortex-a53-aarch64"));
+    // For speech synthesis, we will link against the Orca library.
+    //speech_mod.linkSystemLibrary("pv_orca", .{ .needed = true });
+    //speech_mod.linkSystemLibrary("asound", .{ .needed = true });
+    //speech_mod.linkSystemLibrary("pulse-simple", .{ .needed = true });
+
     // We will also create a module for our other entry point, 'main.zig'.
     const exe_mod = b.createModule(.{
         // `root_source_file` is the Zig "entry point" of the module. If a module
@@ -41,29 +73,65 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    // TODO: make this conditional based on system
-    // Tweak the include path for cross-compiling for RPi
-    lib_mod.addSystemIncludePath(.{ .cwd_relative = "/Users/scott/dev/Personal/Robot/rpi-sysroot/usr/include" });
-    lib_mod.addSystemIncludePath(.{ .cwd_relative = "/Users/scott/dev/Personal/Robot/rpi-sysroot/usr/include/arm-linux-gnueabihf" });
-    lib_mod.addLibraryPath(.{ .cwd_relative = "/Users/scott/dev/Personal/Robot/rpi-sysroot/usr/lib" });
-    exe_mod.addSystemIncludePath(.{ .cwd_relative = "/Users/scott/dev/Personal/Robot/rpi-sysroot/usr/include" });
-    // exe_mod.addLibraryPath(b.path("orca/lib/raspberry-pi/cortex-a53"));
-    exe_mod.addLibraryPath(.{ .cwd_relative = "/Users/scott/dev/Personal/Robot/rpi-sysroot/usr/lib/arm-linux-gnueabihf" });
-    // exe_mod.linkSystemLibrary("rt", .{ .needed = true });
-    // exe_mod.linkSystemLibrary("pv_orca", .{ .needed = true });
-    // exe_mod.linkSystemLibrary("asound", .{ .needed = true });
+    const types_mod = b.createModule(.{
+        // `root_source_file` is the Zig "entry point" of the module. If a module
+        // only contains e.g. external object files, you can make this `null`.
+        // In this case the main source file is merely a path, however, in more
+        // complicated build scripts, this could be a generated file.
+        .root_source_file = b.path("src/types.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    // Conditional Compilation Flags
+    if (cross_compile) {
+        std.debug.print("Cross-compiling for Raspberry Pi\n", .{});
+        // Tweak the include path for cross-compiling for RPi (the default)
+        lib_mod.addSystemIncludePath(.{ .cwd_relative = "/Users/scott/dev/Personal/Robot/rpi-sysroot/usr/include" });
+        //lib_mod.addSystemIncludePath(.{ .cwd_relative = "/Users/scott/dev/Personal/Robot/rpi-sysroot/usr/include/arm-linux-gnueabihf" });
+        lib_mod.addSystemIncludePath(.{ .cwd_relative = "/Users/scott/dev/Personal/Robot/rpi-sysroot/usr/include/aarch64-linux-gnu" });
+        lib_mod.addLibraryPath(.{ .cwd_relative = "/Users/scott/dev/Personal/Robot/rpi-sysroot/usr/lib" });
+
+        web_mod.addSystemIncludePath(.{ .cwd_relative = "/Users/scott/dev/Personal/Robot/rpi-sysroot/usr/include" });
+        //web_mod.addSystemIncludePath(.{ .cwd_relative = "/Users/scott/dev/Personal/Robot/rpi-sysroot/usr/include/arm-linux-gnueabihf" });
+        web_mod.addSystemIncludePath(.{ .cwd_relative = "/Users/scott/dev/Personal/Robot/rpi-sysroot/usr/include/aarch64-linux-gnu" });
+        web_mod.addLibraryPath(.{ .cwd_relative = "/Users/scott/dev/Personal/Robot/rpi-sysroot/usr/lib" });
+
+        speech_mod.addSystemIncludePath(.{ .cwd_relative = "/Users/scott/dev/Personal/Robot/rpi-sysroot/usr/include" });
+        speech_mod.addLibraryPath(.{ .cwd_relative = "/Users/scott/dev/Personal/Robot/rpi-sysroot/usr/lib" });
+        //speech_mod.addLibraryPath(.{ .cwd_relative = "/Users/scott/dev/Personal/Robot/rpi-sysroot/usr/lib/arm-linux-gnueabihf" });
+        speech_mod.addLibraryPath(.{ .cwd_relative = "/Users/scott/dev/Personal/Robot/rpi-sysroot/usr/lib/aarch64-linux-gnu" });
+
+        exe_mod.addSystemIncludePath(.{ .cwd_relative = "/Users/scott/dev/Personal/Robot/rpi-sysroot/usr/include" });
+        // exe_mod.addLibraryPath(b.path("orca/lib/raspberry-pi/cortex-a53"));
+        //exe_mod.addLibraryPath(.{ .cwd_relative = "/Users/scott/dev/Personal/Robot/rpi-sysroot/usr/lib/arm-linux-gnueabihf" });
+        exe_mod.addLibraryPath(.{ .cwd_relative = "/Users/scott/dev/Personal/Robot/rpi-sysroot/usr/lib/aarch64-linux-gnu" });
+        // exe_mod.linkSystemLibrary("rt", .{ .needed = true });
+        // exe_mod.linkSystemLibrary("pv_orca", .{ .needed = true });
+        // exe_mod.linkSystemLibrary("asound", .{ .needed = true });
+    } else {
+        std.debug.print("Compiling for native platform.\n", .{});
+        // TODO: stubs for pigpio
+        // exe_mod.addLibraryPath(b.path("orca/lib/macos/x86_64"));
+    }
 
     // Modules can depend on one another using the `std.Build.Module.addImport` function.
     // This is what allows Zig source code to use `@import("foo")` where 'foo' is not a
     // file path. In this case, we set up `exe_mod` to import `lib_mod`.
-    exe_mod.addImport("robot_zig_lib", lib_mod);
+    exe_mod.addImport("robot_lib", lib_mod);
+    exe_mod.addImport("robot_web", web_mod);
+    exe_mod.addImport("speech", speech_mod);
+    exe_mod.addImport("types", types_mod);
+    lib_mod.addImport("types", types_mod);
+    web_mod.addImport("types", types_mod);
+    web_mod.addImport("speech", speech_mod);
 
     // Now, we will create a static library based on the module we created above.
     // This creates a `std.Build.Step.Compile`, which is the build step responsible
     // for actually invoking the compiler.
     const lib = b.addLibrary(.{
         .linkage = .static,
-        .name = "robot_zig",
+        .name = "robot_lib",
         .root_module = lib_mod,
     });
 
@@ -72,10 +140,24 @@ pub fn build(b: *std.Build) void {
     // running `zig build`).
     b.installArtifact(lib);
 
+    const web = b.addLibrary(.{
+        .linkage = .static,
+        .name = "robot_web",
+        .root_module = web_mod,
+    });
+    b.installArtifact(web);
+
+    const speech = b.addLibrary(.{
+        .linkage = .static,
+        .name = "speech",
+        .root_module = speech_mod,
+    });
+    b.installArtifact(speech);
+
     // This creates another `std.Build.Step.Compile`, but this one builds an executable
     // rather than a static library.
     const exe = b.addExecutable(.{
-        .name = "robot_zig",
+        .name = "robot",
         .root_module = exe_mod,
     });
 
@@ -85,9 +167,8 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    // the executable from your call to b.addExecutable(...)
     exe.root_module.addImport("httpz", httpz.module("httpz"));
-    /////////// SWP -- using http.zig for a web control panel /////
+    web.root_module.addImport("httpz", httpz.module("httpz"));
 
     lib.linkSystemLibrary("pigpio");
     lib.linkLibC();

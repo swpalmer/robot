@@ -8,7 +8,9 @@ pub fn build(b: *std.Build) void {
     // what target to build for. Here we do not override the defaults, which
     // means any target is allowed, and the default is native. Other options
     // for restricting supported target set are available.
-    const target = b.standardTargetOptions(.{});
+    const target = b.standardTargetOptions(.{
+        .default_target = .{ .cpu_arch = .arm, .os_tag = .linux, .abi = .gnueabihf },
+    });
 
     // Standard optimization options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
@@ -39,6 +41,18 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // TODO: make this conditional based on system
+    // Tweak the include path for cross-compiling for RPi
+    lib_mod.addSystemIncludePath(.{ .cwd_relative = "/Users/scott/dev/Personal/Robot/rpi-sysroot/usr/include" });
+    lib_mod.addSystemIncludePath(.{ .cwd_relative = "/Users/scott/dev/Personal/Robot/rpi-sysroot/usr/include/arm-linux-gnueabihf" });
+    lib_mod.addLibraryPath(.{ .cwd_relative = "/Users/scott/dev/Personal/Robot/rpi-sysroot/usr/lib" });
+    exe_mod.addSystemIncludePath(.{ .cwd_relative = "/Users/scott/dev/Personal/Robot/rpi-sysroot/usr/include" });
+    // exe_mod.addLibraryPath(b.path("orca/lib/raspberry-pi/cortex-a53"));
+    exe_mod.addLibraryPath(.{ .cwd_relative = "/Users/scott/dev/Personal/Robot/rpi-sysroot/usr/lib/arm-linux-gnueabihf" });
+    // exe_mod.linkSystemLibrary("rt", .{ .needed = true });
+    // exe_mod.linkSystemLibrary("pv_orca", .{ .needed = true });
+    // exe_mod.linkSystemLibrary("asound", .{ .needed = true });
+
     // Modules can depend on one another using the `std.Build.Module.addImport` function.
     // This is what allows Zig source code to use `@import("foo")` where 'foo' is not a
     // file path. In this case, we set up `exe_mod` to import `lib_mod`.
@@ -65,8 +79,8 @@ pub fn build(b: *std.Build) void {
         .root_module = exe_mod,
     });
 
-    /////// SWP -- Using http.zig for a web control panel    ////
-    ///////  Possibly enven web VR stuff for Occulus control ////
+    ////  SWP -- Using http.zig for a web control panel   ////
+    ////  Possibly even web VR stuff for Occulus control  ////
     const httpz = b.dependency("httpz", .{
         .target = target,
         .optimize = optimize,
@@ -76,6 +90,7 @@ pub fn build(b: *std.Build) void {
     /////////// SWP -- using http.zig for a web control panel /////
 
     lib.linkSystemLibrary("pigpio");
+    lib.linkLibC();
     exe.linkLibC();
 
     // This declares intent for the executable to be installed into the
@@ -126,4 +141,9 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_exe_unit_tests.step);
+
+    // Clean step to remove build artifacts
+    const clean_step = b.step("clean", "Clean build artifacts");
+    const clean_cmd = b.addSystemCommand(&.{ "rm", "-rf", ".zig-cache", "zig-out" });
+    clean_step.dependOn(&clean_cmd.step);
 }

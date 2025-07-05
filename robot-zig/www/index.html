@@ -1,22 +1,41 @@
 <html>
     <head>
         <title>ROBOT</title>
+        <style>
+            #summary {
+                font-family: monospace;
+                font-size: 16px;
+                margin-bottom: 20px;
+            }
+        </style>
     </head>
     <body>
         <h1>Hello!  From the Robot!</h1>
-        <table>
-            <tr><td>Kp</td><td id="curKp">#</td></tr>
-            <tr><td>Ki</td><td id="curKi">#</td></tr>
-            <tr><td>Kd</td><td id="curKd">#</td></tr>
-        </table>
-
+        <h2>PID Parameters</h2>
+        <div id = "summary"></div>
         <h2>PID Parameter Adjustment</h2>
         <div>
-        <form id="pidFormUpright">
-            <input id="kpFieldUpright" name="Kp" type="number" step="any" value="">
-            <input id="kiFieldUpright" name="Ki" type="number" step="any" value="">
-            <input id="kdFieldUpright" name="Kd" type="number" step="any" value="">
-            <button type="submit" >Update</button>
+        <form id="pidFormStable">
+            <input id="kpFieldStable" name="Kp" type="number" step="any" value="">
+            <input id="kiFieldStable" name="Ki" type="number" step="any" value="">
+            <input id="kdFieldStable" name="Kd" type="number" step="any" value="">
+            <input type="submit" >Update</input>
+        </form>
+        </div>
+        <div>
+        <form id="pidFormFine">
+            <input id="kpFieldFine" name="Kp" type="number" step="any" value="">
+            <input id="kiFieldFine" name="Ki" type="number" step="any" value="">
+            <input id="kdFieldFine" name="Kd" type="number" step="any" value="">
+            <input type="submit" >Update</input>
+        </form>
+        </div>
+        <div>
+        <form id="pidFormModerate">
+            <input id="kpFieldModerate" name="Kp" type="number" step="any" value="">
+            <input id="kiFieldModerate" name="Ki" type="number" step="any" value="">
+            <input id="kdFieldModerate" name="Kd" type="number" step="any" value="">
+            <input type="submit" >Update</input>
         </form>
         </div>
         <div>
@@ -24,7 +43,7 @@
             <input id="kpFieldFalling" name="Kp" type="number" step="any" value="">
             <input id="kiFieldFalling" name="Ki" type="number" step="any" value="">
             <input id="kdFieldFalling" name="Kd" type="number" step="any" value="">
-            <button type="submit" >Update</button>
+            <input type="submit" >Update</input>
         </form>
         </div>
 
@@ -32,34 +51,68 @@
         <form id="speakForm" onsubmit="sayIt(evt)">
             <label for="phrase">What should I say? </label>
             <input id="phrase" name="text" type="text">
-            <button type="submit">Speak</button>
+            <input type="submit" >Speak</input>
         </form>
 
-        <script type="text/javascript" src="script.js">
-        </script>
+        <br />
+        <br />
+        <div id="time"></div>
+        <script type="text/javascript" src="script.js"></script>
         <script type="text/javascript">
-            // Initialize the PID values 
-            fetch('/api/pidCurrent', {
-            method: 'GET'})
-            .then(response => response.json())
-            .then(data => {
-                console.log('Success:', data);
-                document.getElementById('curKp').innerText = data.Kp;
-                document.getElementById('curKi').innerText = data.Ki;
-                document.getElementById('curKd').innerText = data.Kd;
-
-                document.getElementById('kpFieldUpright').value = data.upright.Kp;
-                document.getElementById('kiFieldUpright').value = data.upright.Ki;
-                document.getElementById('kdFieldUpright').value = data.upright.Kd;
-
-                document.getElementById('kpFieldFalling').value = data.falling.Kp;
-                document.getElementById('kiFieldFalling').value = data.falling.Ki;
-                document.getElementById('kdFieldFalling').value = data.falling.Kd;
-
-            })
-            .catch(error => {
-                console.error('Error:', error);
+            const dot3 = new Intl.NumberFormat('en-US', {
+            minimumFractionDigits: 3,      
+            maximumFractionDigits: 3,
             });
+
+            function formatPID(value) {
+                return `Kp:${dot3.format(value.Kp)}  Ki:${dot3.format(value.Ki)}  Kd:${dot3.format(value.Kd)}`;
+            }
+            // Initialize the PID values 
+            refreshState();
+            setTimeout(refresh, 5000);
+
+            function refresh() {
+                refreshState();
+                setTimeout(refresh, 5000);
+            }
+
+            function refreshState() {
+                fetch('/api/pidCurrent', {
+                method: 'GET'})
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Success:', data);
+                    document.getElementById('summary').innerHTML = `
+Current ${formatPID(data.current)}<br /><br />
+State: ${data.state}<br />
+Stable&nbsp;&nbsp;&nbsp;${formatPID(data.stable)}<br />
+Fine&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;${formatPID(data.fine)}<br />
+Moderate&nbsp;${formatPID(data.moderate)}<br />
+Falling&nbsp;&nbsp;${formatPID(data.falling)}<br />
+<br />`;
+
+                    document.getElementById('kpFieldStable').value = data.stable.Kp;
+                    document.getElementById('kiFieldStable').value = data.stable.Ki;
+                    document.getElementById('kdFieldStable').value = data.stable.Kd;
+
+                    document.getElementById('kpFieldFine').value = data.fine.Kp;
+                    document.getElementById('kiFieldFine').value = data.fine.Ki;
+                    document.getElementById('kdFieldFine').value = data.fine.Kd;
+
+                    document.getElementById('kpFieldModerate').value = data.moderate.Kp;
+                    document.getElementById('kiFieldModerate').value = data.moderate.Ki;
+                    document.getElementById('kdFieldModerate').value = data.moderate.Kd;
+
+                    document.getElementById('kpFieldFalling').value = data.falling.Kp;
+                    document.getElementById('kiFieldFalling').value = data.falling.Ki;
+                    document.getElementById('kdFieldFalling').value = data.falling.Kd;
+
+                    document.getElementById('time').innerText = `Time: ${new Date()}`;
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+            }
         </script>
     </body>
 </html>

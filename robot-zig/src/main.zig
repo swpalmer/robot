@@ -10,28 +10,40 @@ const web = @import("robot_web");
 const tts = @import("speech");
 
 const types = @import("types");
+const BalanceState = types.BalanceState;
+const PIDTwiddleState = types.PIDTwiddleState;
 
-const PIDValues = types.PIDValues;
+const PID_Ks = types.PID_Ks;
 const MOTOR_DONT_BOTHER: f32 = 0.0002; // Motor lower than this, not really needing to move at all.
 const MOTOR_MIN: f32 = 0.0004; // to overcome internal friction, etc.
 const MOTOR_MAX: f32 = 0.30; // limiting motor power %
 const SAMPLE_PERIOD_US = 4000; // 4ms
-const SCALE_FACTOR: f32 = 0.0001;
+const DRIVE_MOTOR_POWER_SCALE_FACTOR: f32 = 0.0002;
 const MAX_VELOCITY_DELTA: f32 = 0.6;
 const TILT_BIAS: f32 = 3.6; // 3.5° bias to properly balance with current physical config
 
 //var pid = PID{ .kp = 5.0, .ki = 0, .kd = 0.5 };
 // var pid = PID{ .kp = 1.0, .ki = 0, .kd = 1.5 }; flops on the ground
-const PID_Ks = types.PIDValues;
 
-//var pidKs_5 = PID_Ks{ .Kp = 10.0, .Ki = 0.0, .Kd = 5.0 };
+// pid values currently in use (may be a linear interpolation between the values below)
 var pid = PID{ .K = .{ .Kp = 15.0, .Ki = 0, .Kd = 2.0 } };
-var pidKs_upright = PID_Ks{ .Kp = 14.5, .Ki = 0.0, .Kd = 6.5 };
+
+var pidKs_stable = PID_Ks{ .Kp = 14.3, .Ki = 0.0, .Kd = 4.1 };
+var pidKs_fine = PID_Ks{ .Kp = 20.5, .Ki = 0.0, .Kd = 6.7 };
+var pidKs_moderate = PID_Ks{ .Kp = 50.5, .Ki = 0.0, .Kd = 15.5 };
 var pidKs_falling = PID_Ks{ .Kp = 115.0, .Ki = 0.0, .Kd = 20.0 };
 
-const stable_threshold = 1.5;
-const upright_threshold = 7.0; // use more agressive correction after tilt of this many degrees
-const falling_threshold = 35.0; // after this we give up and shut off the motors.
+// TWIDDLE
+var twiddle_Stable = PIDTwiddleState{ .params = PID_Ks{ .Kp = 14.3, .Ki = 0.0, .Kd = 4.1 }, .deltas = PID_Ks{ .Kp = 0.1, .Ki = 0.0, .Kd = 0.1 }, .best_cost = 100000.0 };
+var twiddle_Fine = PIDTwiddleState{ .params = PID_Ks{ .Kp = 20.2, .Ki = 0.0, .Kd = 6.7 }, .deltas = PID_Ks{ .Kp = 0.1, .Ki = 0.0, .Kd = 0.1 }, .best_cost = 100000.0 };
+var twiddle_Moderate = PIDTwiddleState{ .params = PID_Ks{ .Kp = 50.0, .Ki = 0.0, .Kd = 15.0 }, .deltas = PID_Ks{ .Kp = 0.1, .Ki = 0.0, .Kd = 0.1 }, .best_cost = 100000.0 };
+var twiddle_Falling = PIDTwiddleState{ .params = PID_Ks{ .Kp = 115.0, .Ki = 0.0, .Kd = 20.0 }, .deltas = PID_Ks{ .Kp = 0.1, .Ki = 0.0, .Kd = 0.1 }, .best_cost = 100000.0 };
+const twiddle = false; // set to true to enable twiddling
+
+const fine_threshold = 1.0; // up to this many degrees, we are stable and need minial power to remain balanced
+const moderate_threshold = 5.0; // use more aggressive correction after tilt of this many degrees
+const falling_threshold = 10.0; // Need aggressive correction after tilt of this many degrees
+const unstable_threshold = 22.0; // If tilt is more than this, we are falling over, cut the motors
 
 var joytick_x: f32 = 0.0; // steering control
 var joytick_y: f32 = 0.0; // throttle control
@@ -40,8 +52,30 @@ var angle: f32 = 0.0; // filtered tilt angle
 const alpha: f32 = 0.975;
 var target_angle: f32 = 0.0;
 var prev_gyro_rate_dps: f32 = 0.0;
-var tilt_mode: i8 = 0;
+var tilt_mode: BalanceState = BalanceState.Fine;
 var last_tilt_mode: i8 = 0;
+
+const webContext = if (twiddle) web.WebContext{
+    .pid = &pid.K,
+    .stable = &twiddle_Stable.params,
+    .fine = &twiddle_Fine.params,
+    .moderate = &twiddle_Moderate.params,
+    .falling = &twiddle_Falling.params,
+    .state = &tilt_mode,
+    .flag_ptr = &in_sensor_debug,
+    .x = &joytick_x,
+    .y = &joytick_y,
+} else web.WebContext{
+    .pid = &pid.K,
+    .stable = &pidKs_stable,
+    .fine = &pidKs_fine,
+    .moderate = &pidKs_moderate,
+    .falling = &pidKs_falling,
+    .state = &tilt_mode,
+    .flag_ptr = &in_sensor_debug,
+    .x = &joytick_x,
+    .y = &joytick_y,
+};
 
 pub fn main() !void {
     std.debug.print("Robots are cool.\n", .{});
@@ -58,19 +92,11 @@ pub fn main() !void {
     try tts.init();
     defer tts.deinit() catch unreachable;
 
-    var context = web.WebContext{
-        .pid = &pid.K,
-        .upright = &pidKs_upright,
-        .falling = &pidKs_falling,
-        .flag_ptr = &in_sensor_debug,
-        .x = &joytick_x,
-        .y = &joytick_y,
-    };
-
     try stdout.print("Setting up internal web server...\n", .{});
     try bw.flush();
+
     // start webserver
-    var server = try web.webserver(&context);
+    var server = try web.webserver(&webContext);
     defer {
         server.stop();
         server.deinit();
@@ -188,51 +214,61 @@ fn balance() !void {
 
         // Based on the absolute angle we will adjust the PID gains so it is more agressive when severely tilted
         const angleAbs = @abs(angle);
-        if (angleAbs < upright_threshold) { // minor adjustment
-            tilt_mode = if (angleAbs < stable_threshold) 0 else 1;
+        const gyroAbs = @abs(gyro_rate_avg);
+        tilt_mode = calcBalanceState(angleAbs, gyroAbs); // default to Fine control
 
-            // interpolate PID gains based on angle
-            const ratio = if (tilt_mode == 1)
-                (angleAbs - stable_threshold) / (upright_threshold - stable_threshold)
-            else
-                0.0;
-            pid.K.Kp = pidKs_upright.Kp * (1.0 - ratio) + pidKs_falling.Kp * ratio;
-            pid.K.Ki = pidKs_upright.Ki * (1.0 - ratio) + pidKs_falling.Ki * ratio;
-            pid.K.Kd = pidKs_upright.Kd * (1.0 - ratio) + pidKs_falling.Kd * ratio;
-
-            // pid.K.Kp = pidKs_upright.Kp;
-            // pid.K.Ki = pidKs_upright.Ki;
-            // pid.K.Kd = pidKs_upright.Kd;
-        } else if (angleAbs < falling_threshold) { // off balance
-            tilt_mode = 2;
-            // interpolate PID gains based on angle
-            // const ratio = (angleAbs - upright_threshold) / (falling_threshold - upright_threshold);
-            // pid.K.Kp = pidKs_upright.Kp * (1.0 - ratio) + pidKs_falling.Kp * ratio;
-            // pid.K.Ki = pidKs_upright.Ki * (1.0 - ratio) + pidKs_falling.Ki * ratio;
-            // pid.K.Kd = pidKs_upright.Kd * (1.0 - ratio) + pidKs_falling.Kd * ratio;
-
-            pid.K.Kp = pidKs_falling.Kp;
-            pid.K.Ki = pidKs_falling.Ki;
-            pid.K.Kd = pidKs_falling.Kd;
-        } else { // too much, don't try to recover, shut off motors
-            tilt_mode = 3;
-        }
-        if (tilt_mode != last_tilt_mode) {
-            std.debug.print("Mode changed: {s}\n", .{switch (tilt_mode) {
-                0 => "stable",
-                1 => "off-balance",
-                2 => "falling over",
-                else => "I've fallen, and I can't get up!",
-            }});
-            last_tilt_mode = tilt_mode;
-            if (tilt_mode > 2) {
-                // get out of the balance loop.
-                // main method will turn off motors and exit
-                break;
+        // TWIDDLE to fine tune PID gains
+        if (twiddle) {
+            const twiddle_pick: ?*PIDTwiddleState = switch (tilt_mode) {
+                BalanceState.Stable => &twiddle_Stable,
+                BalanceState.Fine => &twiddle_Fine,
+                BalanceState.Moderate => &twiddle_Moderate,
+                BalanceState.Falling => &twiddle_Falling,
+                else => null, // no twiddling for Falling or Fall states
+            };
+            if (twiddle_pick) |twiddle_state| {
+                twiddle_state.current_cost += compute_cost(angle_error, dt);
+                twiddle_state.num_samples += 1;
+                if (twiddle_state.num_samples >= 600) { // approx 3 seconds of samples
+                    // after threshold
+                    std.debug.print("Twiddling cost for {} state is {} after {} samples.\n", .{ tilt_mode, twiddle_state.current_cost, twiddle_state.num_samples });
+                    twiddle_update(twiddle_state);
+                    pid.K = twiddle_state.params;
+                }
+            }
+        } else {
+            switch (tilt_mode) {
+                BalanceState.Stable => {
+                    // Fine control, use normal PID gains
+                    pid.K = pidKs_stable;
+                },
+                BalanceState.Fine => {
+                    const gain_factor = std.math.clamp(angleAbs / (moderate_threshold - fine_threshold), 0.0, 1.0);
+                    pid.K = lerp(pidKs_fine, pidKs_moderate, gain_factor);
+                },
+                BalanceState.Moderate => {
+                    // Moderate disturbance, use more agressive PID gains
+                    const gain_factor = std.math.clamp(angleAbs / (falling_threshold - moderate_threshold), 0.0, 1.0);
+                    pid.K = lerp(pidKs_moderate, pidKs_falling, gain_factor);
+                },
+                BalanceState.Falling => {
+                    // Falling over, use very agressive PID gains
+                    pid.K = pidKs_falling;
+                },
+                BalanceState.Fall => {
+                    // Too far gone to recover, just cut the motors
+                    main_drive_motors(0, 0);
+                    std.debug.print("Falling over! Cutting motors.\n", .{});
+                    return; // exit balance loop
+                },
+                // else => {
+                //     std.debug.print("Unknown tilt mode: {}\n", .{tilt_mode});
+                //     pid.K = pidKs_fine; // fallback to conservative PID gains
+                // },
             }
         }
 
-        const output = pid.update(angle_error, gyro_rate_dps, dt) * SCALE_FACTOR;
+        const output = pid.update(angle_error, gyro_rate_dps, dt) * DRIVE_MOTOR_POWER_SCALE_FACTOR;
         const clamped_output = std.math.clamp(output, -MOTOR_MAX, MOTOR_MAX);
 
         var motor_power = clamped_output;
@@ -251,10 +287,11 @@ fn balance() !void {
         const right_power = motor_power - steering_power;
 
         // simulated braking with brief reverse pulse
+        const simulated_braking = false; // set to true to enable simulated braking
         const min_drive = 0.002;
         const braking_threshold = 3;
         const brake_strength = 0.0017;
-        if (@abs(motor_power) < min_drive and @abs(gyro_rate_dps) > braking_threshold) {
+        if (simulated_braking and @abs(motor_power) < min_drive and @abs(gyro_rate_dps) > braking_threshold) {
             // apply short reverse pulse
             const brake_power = -brake_strength * sign(gyro_rate_dps);
             main_drive_motors(brake_power, brake_power);
@@ -266,9 +303,9 @@ fn balance() !void {
         //std.debug.print("Current gyro rate: {d: >7.4}°/s\n", .{gyro_rate_dps});
         const msg = "{s}𝚫t = {d: >7.6}s,   error = {d: >7.4}, da/dt = {d: >8.4}°/s   P = {d: >8.4},   I = {d: >8.4},   D = {d: >8.4},   output = {d: >7.4}{s}\x1b[39m\x1b[A\n";
         const text_colour = switch (tilt_mode) {
-            0 => "\x1b[32m",
-            1 => "\x1b[33m",
-            2 => "\x1b[31m",
+            BalanceState.Stable, BalanceState.Fine => "\x1b[32m",
+            BalanceState.Moderate => "\x1b[33m",
+            BalanceState.Falling => "\x1b[31m",
             else => "",
         };
         const is_clamped = if (clamped_output != output) " motor output clamped" else ""; //clamped_output
@@ -284,6 +321,91 @@ fn balance() !void {
     }
     std.debug.print("Exited balance loop.", .{});
 }
+
+fn lerp(a: PID_Ks, b: PID_Ks, t: f32) PID_Ks {
+    return .{
+        .Kp = a.Kp + (b.Kp - a.Kp) * t,
+        .Ki = a.Ki + (b.Ki - a.Ki) * t,
+        .Kd = a.Kd + (b.Kd - a.Kd) * t,
+    };
+}
+
+fn calcBalanceState(angleAbs: f32, gyroAbs: f32) BalanceState {
+    if (angleAbs > unstable_threshold) {
+        // We are falling over, cut the motors
+        return BalanceState.Fall;
+    }
+    if (angleAbs > falling_threshold or gyroAbs > 80.0) {
+        // We are falling over, cut the motors
+        return BalanceState.Falling;
+    } else if (angleAbs > moderate_threshold) {
+        // Emergency recovery mode
+        return BalanceState.Moderate;
+    } else if (abs(angle) > fine_threshold) {
+        // Mild disturbance - still upright
+        return BalanceState.Fine;
+    } else { // within stable threshold
+        // Steady-state fine control
+        return BalanceState.Stable;
+    }
+}
+
+// TWIDDLE
+
+fn compute_cost(angle_error: f32, dt: f32) f32 {
+    return angle_error * angle_error * dt;
+}
+fn twiddle_update(t: *PIDTwiddleState) void {
+    const current_cost = t.current_cost;
+    const i = t.step % 3;
+    var param_ptr: *f32 = undefined;
+    var delta_ptr: *f32 = undefined;
+    if (i == 0) {
+        param_ptr = &t.params.Kp;
+        delta_ptr = &t.deltas.Kp;
+    } else if (i == 1) {
+        param_ptr = &t.params.Ki;
+        delta_ptr = &t.deltas.Ki;
+    } else {
+        param_ptr = &t.params.Kd;
+        delta_ptr = &t.deltas.Kd;
+    }
+
+    switch (t.state) {
+        .Init => {
+            param_ptr.* += delta_ptr.*;
+            t.state = .TryIncrease;
+        },
+        .TryIncrease => {
+            if (current_cost < t.best_cost) {
+                t.best_cost = current_cost;
+                delta_ptr.* *= 1.1;
+                t.step += 1;
+                t.state = .Init;
+            } else {
+                param_ptr.* -= 2 * delta_ptr.*;
+                t.state = .TryDecrease;
+            }
+        },
+        .TryDecrease => {
+            if (current_cost < t.best_cost) {
+                t.best_cost = current_cost;
+                delta_ptr.* *= 1.1;
+            } else {
+                param_ptr.* += delta_ptr.*;
+                delta_ptr.* *= 0.9;
+            }
+            t.step += 1;
+            t.state = .Init;
+        },
+        else => {},
+    }
+    // reset for next iteration
+    t.num_samples = 0;
+    t.current_cost = 0.0;
+}
+
+// utils
 
 fn sleepMicroseconds(useconds: u64) void {
     std.time.sleep(1000 * useconds);
@@ -313,7 +435,7 @@ fn limit_rate(current: f32, target: f32, dt: f32) f32 {
 
 // PID stuff
 const PID = struct {
-    K: types.PIDValues,
+    K: PID_Ks,
     // Kp: f32 = 0,
     // Ki: f32 = 0, // was 0.01
     // Kd: f32 = 0, // was 0.005

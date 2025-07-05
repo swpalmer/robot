@@ -21,26 +21,29 @@ const types = @import("types");
 const tts = @import("speech");
 const websocket = httpz.websocket;
 
-const PIDValues = types.PIDValues;
+const PID_Ks = types.PID_Ks;
 const SpeakParams = struct { text: []u8 };
 const DriveParams = struct { x: f32, y: f32 };
 
 // This is the context that will be available to every request handler.
 pub const WebContext = struct {
-    pid: *PIDValues,
-    upright: *PIDValues,
-    falling: *PIDValues,
+    pid: *PID_Ks,
+    stable: *PID_Ks,
+    fine: *PID_Ks,
+    moderate: *PID_Ks,
+    falling: *PID_Ks,
+    state: *types.BalanceState, // This is the current balance state
     flag_ptr: *volatile bool,
     x: *f32,
     y: *f32,
     pub const WebsocketHandler = WSClient;
 };
 
-pub fn webserver(context: *WebContext) !httpz.Server(*WebContext) {
+pub fn webserver(context: *const WebContext) !httpz.Server(*const WebContext) {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    var server = try httpz.Server(*WebContext).init(allocator, .{ .address = "0.0.0.0", .port = 40607 }, context);
+    var server = try httpz.Server(*const WebContext).init(allocator, .{ .address = "0.0.0.0", .port = 40607 }, context);
 
     var router = try server.router(.{});
     // Main page
@@ -48,13 +51,15 @@ pub fn webserver(context: *WebContext) !httpz.Server(*WebContext) {
 
     // APIs
     router.get("/api/pidCurrent", getCurrentPID, .{});
-    router.post("/api/pidUpright", postUprightPID, .{});
+    router.post("/api/pidStable", postStablePID, .{});
+    router.post("/api/pidFine", postFinePID, .{});
+    router.post("/api/pidModerate", postModeratePID, .{});
     router.post("/api/pidFalling", postFallingPID, .{});
     router.post("/api/speak", postSpeak, .{});
     router.post("/api/drive", postDrive, .{});
     router.post("/api/reset", postReset, .{});
 
-    // WebScoket for steering control
+    // TODO WebSocket for steering control (currently unused, using /api/drive POST endpoint)
     router.get("/ws", ws, .{});
 
     //blocks
@@ -67,7 +72,7 @@ pub fn webserver(context: *WebContext) !httpz.Server(*WebContext) {
 
 const robot_prefix = "/robot/";
 
-fn robotPage(context: *WebContext, req: *httpz.Request, res: *httpz.Response) !void {
+fn robotPage(context: *const WebContext, req: *httpz.Request, res: *httpz.Response) !void {
     _ = context;
     // req.url;
     std.debug.print("Request for robot page: {s}\n", .{req.url.path});
@@ -132,38 +137,30 @@ fn robotPage(context: *WebContext, req: *httpz.Request, res: *httpz.Response) !v
     }
 }
 
-fn getCurrentPID(context: *WebContext, req: *httpz.Request, res: *httpz.Response) !void {
+fn getCurrentPID(context: *const WebContext, req: *httpz.Request, res: *httpz.Response) !void {
     _ = req;
     res.status = 200;
 
     // Return the current PID values
     try res.json(.{
-        .Kp = context.pid.Kp,
-        .Ki = context.pid.Ki,
-        .Kd = context.pid.Kd,
-        .upright = .{
-            .Kp = context.upright.Kp,
-            .Ki = context.upright.Ki,
-            .Kd = context.upright.Kd,
-        },
-        .falling = .{
-            .Kp = context.falling.Kp,
-            .Ki = context.falling.Ki,
-            .Kd = context.falling.Kd,
-        },
+        .current = context.pid,
+        .stable = context.stable,
+        .fine = context.fine,
+        .moderate = context.moderate,
+        .falling = context.falling,
+        .state = context.state.*,
     }, .{});
 }
 // This is the handler for the /pidUpright endpoint
 
-fn postUprightPID(context: *WebContext, req: *httpz.Request, res: *httpz.Response) !void {
-    //_ = req;
+fn postStablePID(context: *const WebContext, req: *httpz.Request, res: *httpz.Response) !void {
     res.status = 200;
 
-    if (try req.json(PIDValues)) |requestedPidValues| {
+    if (try req.json(PID_Ks)) |requestedPidValues| {
         // This isn't atomic... perhaps there is a better way... (E.g. copy from a secondary PIDValues object in main the loop)
-        context.upright.Kp = requestedPidValues.Kp;
-        context.upright.Ki = requestedPidValues.Ki;
-        context.upright.Kd = requestedPidValues.Kd;
+        context.stable.Kp = requestedPidValues.Kp;
+        context.stable.Ki = requestedPidValues.Ki;
+        context.stable.Kd = requestedPidValues.Kd;
     }
 
     // use this a signal that we can try balancing again
@@ -172,11 +169,41 @@ fn postUprightPID(context: *WebContext, req: *httpz.Request, res: *httpz.Respons
     try res.json(.{ .Kp = context.pid.Kp, .Ki = context.pid.Ki, .Kd = context.pid.Kd }, .{});
 }
 
-fn postFallingPID(context: *WebContext, req: *httpz.Request, res: *httpz.Response) !void {
-    //_ = req;
+fn postFinePID(context: *const WebContext, req: *httpz.Request, res: *httpz.Response) !void {
     res.status = 200;
 
-    if (try req.json(PIDValues)) |requestedPidValues| {
+    if (try req.json(PID_Ks)) |requestedPidValues| {
+        // This isn't atomic... perhaps there is a better way... (E.g. copy from a secondary PIDValues object in main the loop)
+        context.fine.Kp = requestedPidValues.Kp;
+        context.fine.Ki = requestedPidValues.Ki;
+        context.fine.Kd = requestedPidValues.Kd;
+    }
+
+    // use this a signal that we can try balancing again
+    context.flag_ptr.* = false;
+
+    try res.json(.{ .Kp = context.pid.Kp, .Ki = context.pid.Ki, .Kd = context.pid.Kd }, .{});
+}
+fn postModeratePID(context: *const WebContext, req: *httpz.Request, res: *httpz.Response) !void {
+    res.status = 200;
+
+    if (try req.json(PID_Ks)) |requestedPidValues| {
+        // This isn't atomic... perhaps there is a better way... (E.g. copy from a secondary PIDValues object in main the loop)
+        context.moderate.Kp = requestedPidValues.Kp;
+        context.moderate.Ki = requestedPidValues.Ki;
+        context.moderate.Kd = requestedPidValues.Kd;
+    }
+
+    // use this a signal that we can try balancing again
+    context.flag_ptr.* = false;
+
+    try res.json(.{ .Kp = context.pid.Kp, .Ki = context.pid.Ki, .Kd = context.pid.Kd }, .{});
+}
+
+fn postFallingPID(context: *const WebContext, req: *httpz.Request, res: *httpz.Response) !void {
+    res.status = 200;
+
+    if (try req.json(PID_Ks)) |requestedPidValues| {
         // This isn't atomic... perhaps there is a better way... (E.g. copy from a secondary PIDValues object in main the loop)
         context.falling.Kp = requestedPidValues.Kp;
         context.falling.Ki = requestedPidValues.Ki;
@@ -189,7 +216,7 @@ fn postFallingPID(context: *WebContext, req: *httpz.Request, res: *httpz.Respons
     try res.json(.{ .Kp = context.pid.Kp, .Ki = context.pid.Ki, .Kd = context.pid.Kd }, .{});
 }
 
-fn postSpeak(_: *WebContext, req: *httpz.Request, res: *httpz.Response) !void {
+fn postSpeak(_: *const WebContext, req: *httpz.Request, res: *httpz.Response) !void {
     res.status = 200;
 
     if (try req.json(SpeakParams)) |requestedSpeech| {
@@ -208,7 +235,7 @@ fn postSpeak(_: *WebContext, req: *httpz.Request, res: *httpz.Response) !void {
     try res.json(.{}, .{});
 }
 
-fn postDrive(context: *WebContext, req: *httpz.Request, res: *httpz.Response) !void {
+fn postDrive(context: *const WebContext, req: *httpz.Request, res: *httpz.Response) !void {
     if (try req.json(DriveParams)) |joystick| {
         std.debug.print("Drive control: x:{d} y:{d}\n", .{ joystick.x, joystick.y });
         context.x.* = joystick.x;
@@ -218,7 +245,7 @@ fn postDrive(context: *WebContext, req: *httpz.Request, res: *httpz.Response) !v
     res.status = 200;
 }
 
-fn postReset(context: *WebContext, req: *httpz.Request, res: *httpz.Response) !void {
+fn postReset(context: *const WebContext, req: *httpz.Request, res: *httpz.Response) !void {
     _ = req;
     context.x.* = 0;
     context.y.* = 0;
@@ -226,9 +253,19 @@ fn postReset(context: *WebContext, req: *httpz.Request, res: *httpz.Response) !v
     context.pid.Kp = 0.0;
     context.pid.Ki = 0.0;
     context.pid.Kd = 0.0;
-    context.upright.Kp = 14.0;
-    context.upright.Ki = 0.0;
-    context.upright.Kd = 5.0;
+
+    context.stable.Kp = 14.0;
+    context.stable.Ki = 0.0;
+    context.stable.Kd = 5.0;
+
+    context.fine.Kp = 14.0;
+    context.fine.Ki = 0.0;
+    context.fine.Kd = 5.0;
+
+    context.moderate.Kp = 14.0;
+    context.moderate.Ki = 0.0;
+    context.moderate.Kd = 5.0;
+
     context.falling.Kp = 100.0;
     context.falling.Ki = 0.0;
     context.falling.Kd = 15.0;
@@ -265,7 +302,7 @@ const WSClient = struct {
     }
 };
 
-fn ws(_: *WebContext, req: *httpz.Request, res: *httpz.Response) !void {
+fn ws(_: *const WebContext, req: *httpz.Request, res: *httpz.Response) !void {
     // Could do authentication or anything else before upgrading the connection
     // The context is any arbitrary data you want to pass to Client.init.
     const ctx = WSClient.Context{ .user_id = 9001 };

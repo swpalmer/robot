@@ -241,3 +241,50 @@ pub fn flip() void {
     defer frameBuffer.close();
     frameBuffer.writeAll(bytes) catch unreachable;
 }
+
+// For Speed measurement, we need to use the hardware timer
+// and the GPIO interrupt to measure the time between pulses.
+
+// TODO: pick the right GPIO pin for speed measurement
+const SPEED_PIN: c_uint = 24; // GPIO pin for speed measurement
+
+pub fn setupSpeedMeasurement() !void {
+    // Setup the pin for input
+    _ = c.gpioSetMode(SPEED_PIN, c.PI_INPUT);
+
+    // Optional: enable pull-down/up if floating
+    _ = c.gpioSetPullUpDown(SPEED_PIN, c.PI_PUD_DOWN);
+
+    // Register the callback
+    _ = c.gpioSetAlertFunc(SPEED_PIN, speed_callback);
+}
+
+// Use a callback to count edges
+var last_tick: u32 = 0;
+var pulse_interval_us: u32 = 0;
+var current_rpm: f32 = 0.0;
+const pulses_per_rev: u32 = 6; // Adjust as needed TODO double check this value
+
+fn speed_callback(gpio: i32, level: i32, tick: u32, userdata: ?*anyopaque) callconv(.C) void {
+    _ = gpio; // Unused parameter
+    _ = userdata; // Unused parameter
+
+    if (level != 1) return; // Rising edge only
+
+    if (last_tick != 0) {
+        const delta = tick - last_tick;
+        pulse_interval_us = delta;
+
+        // Convert pulse interval to RPM:
+        // 1e6 µs/sec, 60 sec/min, divide by pulses per revolution
+        if (pulse_interval_us != 0) {
+            const freq_hz = 1_000_000.0 / @as(f32, @floatFromInt(pulse_interval_us));
+            current_rpm = freq_hz * 60.0 / @as(f32, @floatFromInt(pulses_per_rev));
+        }
+    }
+
+    last_tick = tick;
+}
+pub fn getCurrentRPM() f32 {
+    return current_rpm;
+}

@@ -10,6 +10,9 @@ var aplay: std.process.Child = undefined;
 pub fn init() !void {
     const allocator = std.heap.page_allocator;
 
+    //var piper_pipe_fds: [2]i32 = undefined;
+    //if (c.pipe(&pipe_fds) != 0) return error.PipeFailed;
+
     var pipe_fds: [2]i32 = undefined;
     if (c.pipe(&pipe_fds) != 0) return error.PipeFailed;
 
@@ -18,18 +21,26 @@ pub fn init() !void {
 
     // Start Piper
     piper = std.process.Child.init(&.{
-        "./piper/piper",
-        "--model",
-        "piper/en_GB-cori-medium.onnx",
-        "--output_raw",
+        //     "./piper/piper",
+        "cat", // For testing, replace with Piper command when ready
+        //     "--model",
+        //     "piper/en_GB-cori-medium.onnx",
+        //     "--output_raw",
     }, allocator);
+
     piper.stdin_behavior = .Pipe;
     piper.stdout_behavior = .Pipe;
     piper.stderr_behavior = .Inherit; // ✅ Print Piper's logs to the Zig process console
+    //piper.stdin = std.fs.File{ .handle = piper_pipe_fds[1] }; // Write to Piper's stdin
     piper.stdout = std.fs.File{ .handle = pipe_write };
 
     // Start Aplay
-    aplay = std.process.Child.init(&.{ "aplay", "-r", "22050", "-f", "S16_LE", "-t", "raw", "-" }, allocator);
+    aplay = std.process.Child.init(&.{
+        // "aplay",
+        "cat", // For testing, replace with Aplay command when ready
+        //"-r", "22050", "-f", "S16_LE", "-t", "raw", "-"
+    }, allocator);
+
     aplay.stdin_behavior = .Pipe;
     aplay.stdout_behavior = .Inherit; // ✅ Print aplay's logs to the Zig process console
     aplay.stderr_behavior = .Inherit; // ✅ Print aplay's logs to the Zig process console

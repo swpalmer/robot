@@ -1,54 +1,36 @@
-const pidFormUpright = document.getElementById('pidFormUpright');
+// File: robot-zig/www/script.js
 
-pidFormUpright.addEventListener('submit', function(event) {
-    event.preventDefault();
-    const formData = new FormData(pidFormUpright);
-    const data = {};
-    formData.forEach((value, key) => {
-        data[key] = Number(value) || value;
+bindPIDForm('Stable');
+bindPIDForm('Fine');
+bindPIDForm('Moderate');
+bindPIDForm('Falling');
+
+function bindPIDForm(state) {
+    const pidForm = document.getElementById('pidForm'+state);
+    pidForm.addEventListener('submit', function(event) {
+        event.preventDefault();
+        const formData = new FormData(pidFormFalling);
+        const data = {};
+        formData.forEach((value, key) => {
+            data[key] = Number(value) || value;
+        });
+
+        fetch('/api/pid'+state, {
+            method: 'POST',
+            headers: {
+            'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        })
+        .then(response => response.json())
+        .then(data => {
+            console.log('Success:', data);
+        })
+        .catch(error => {
+            console.error('Error:', error);
+        });
     });
-
-    fetch('/api/pidUpright', {
-        method: 'POST',
-        headers: {
-        'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(data)
-    })
-    .then(response => response.json())
-    .then(data => {
-        console.log('Success:', data);
-    })
-    .catch(error => {
-        console.error('Error:', error);
-    });
-});
-
-const pidFormFalling = document.getElementById('pidFormFalling');
-
-pidFormFalling.addEventListener('submit', function(event) {
-    event.preventDefault();
-    const formData = new FormData(pidFormFalling);
-    const data = {};
-    formData.forEach((value, key) => {
-        data[key] = Number(value) || value;
-    });
-
-    fetch('/api/pidFalling', {
-        method: 'POST',
-        headers: {
-        'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(data)
-    })
-    .then(response => response.json())
-    .then(data => {
-        console.log('Success:', data);
-    })
-    .catch(error => {
-        console.error('Error:', error);
-    });
-});
+}
 
 const speakForm = document.getElementById('speakForm');
 

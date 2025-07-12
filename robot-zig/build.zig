@@ -11,7 +11,12 @@ pub fn build(b: *std.Build) void {
     // for restricting supported target set are available.
 
     //const native_target = b.standardTargetOptions(.{});
-    const cross_compile = true; //native_target.result.isDarwinLibC();
+    const cross_compile = b.option(bool, "cross_compile", "Enable cross-compiling") orelse false;
+
+    const options = b.addOptions();
+    options.addOption(bool, "cross_compile", cross_compile);
+
+    //const cross_compile = true; //native_target.result.isDarwinLibC();
 
     const target = if (cross_compile)
         // cross compile
@@ -29,6 +34,12 @@ pub fn build(b: *std.Build) void {
     // This creates a "module", which represents a collection of source files alongside
     // some compilation options, such as optimization mode and linked system libraries.
     // Every executable or library we compile will be based on one or more modules.
+    const hal_mod = b.createModule(.{
+        .root_source_file = b.path("src/hal.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const lib_mod = b.createModule(.{
         // `root_source_file` is the Zig "entry point" of the module. If a module
         // only contains e.g. external object files, you can make this `null`.
@@ -55,8 +66,7 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     //speech_mod.addSystemIncludePath(b.path("orca/include"));
-    //speech_mod.addLibraryPath(b.path("orca/lib/raspberry-pi/cortex-a53"));
-    speech_mod.addLibraryPath(b.path("orca/lib/raspberry-pi/cortex-a53-aarch64"));
+    //speech_mod.addLibraryPath(b.path("orca/lib/raspberry-pi/cortex-a53-aarch64"));
     // For speech synthesis, we will link against the Orca library.
     //speech_mod.linkSystemLibrary("pv_orca", .{ .needed = true });
     //speech_mod.linkSystemLibrary("asound", .{ .needed = true });
@@ -122,6 +132,8 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("robot_web", web_mod);
     exe_mod.addImport("speech", speech_mod);
     exe_mod.addImport("types", types_mod);
+    exe_mod.addImport("hal", hal_mod);
+    lib_mod.addImport("hal", hal_mod);
     lib_mod.addImport("types", types_mod);
     web_mod.addImport("types", types_mod);
     web_mod.addImport("speech", speech_mod);
@@ -171,6 +183,8 @@ pub fn build(b: *std.Build) void {
     web.root_module.addImport("httpz", httpz.module("httpz"));
 
     lib.linkSystemLibrary("pigpio");
+    lib.linkSystemLibrary("gpiod");
+    lib.linkSystemLibrary("i2c");
     lib.linkLibC();
     exe.linkLibC();
 

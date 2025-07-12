@@ -37,6 +37,16 @@ pub const WebContext = struct {
     x: *f32,
     y: *f32,
     pub const WebsocketHandler = WSClient;
+    pub fn dispatch(self: *const WebContext, action: httpz.Action(*const WebContext), req: *httpz.Request, res: *httpz.Response) !void {
+        std.debug.print("Dispatching {} {s}...\n", .{ req.method, req.url.path });
+        var timer = try std.time.Timer.start();
+
+        // your `dispatch` doesn't _have_ to call the action
+        try action(self, req, res);
+
+        const elapsed = timer.lap() / 1000; // ns -> us
+        std.debug.print("Dispatched {} {s} {d}\n", .{ req.method, req.url.path, elapsed });
+    }
 };
 
 pub fn webserver(context: *const WebContext) !httpz.Server(*const WebContext) {
@@ -46,8 +56,6 @@ pub fn webserver(context: *const WebContext) !httpz.Server(*const WebContext) {
     var server = try httpz.Server(*const WebContext).init(allocator, .{ .address = "0.0.0.0", .port = 40607 }, context);
 
     var router = try server.router(.{});
-    // Main page
-    router.get("/robot/*", robotPage, .{});
 
     // APIs
     router.get("/api/pidCurrent", getCurrentPID, .{});
@@ -61,6 +69,9 @@ pub fn webserver(context: *const WebContext) !httpz.Server(*const WebContext) {
 
     // TODO WebSocket for steering control (currently unused, using /api/drive POST endpoint)
     router.get("/ws", ws, .{});
+
+    // Main page
+    router.get("/*", robotPage, .{});
 
     //blocks
     //try server.listen();
@@ -81,27 +92,40 @@ fn robotPage(context: *const WebContext, req: *httpz.Request, res: *httpz.Respon
     //try res.json(.{ .id = "Hello", .number = 42 }, .{});
     //res.body = try std.fmt.allocPrint(res.arena, @embedFile("index.html"), .{ @embedFile("script.js"), context.pid.Kp, context.pid.Ki, context.pid.Kd, context.upright.Kp, context.upright.Ki, context.upright.Kd, context.falling.Kp, context.falling.Ki, context.falling.Kd });
 
-    if (std.mem.eql(u8, req.url.path, "/robot/") or std.mem.eql(u8, req.url.path, "/robot")) {
+    if (std.mem.eql(u8, req.url.path, "/")) {
         // Redirect to the main page
         res.status = 301;
-        res.header("Location", "/robot/index.html");
+        res.header("Location", "/index.html");
         return;
     }
 
-    if (!std.mem.startsWith(u8, req.url.path, robot_prefix)) {
-        res.status = 404;
-        res.body = "Not Found";
+    if (std.mem.containsAtLeast(u8, req.url.path, 1, "..")) {
+        res.status = 403;
+        res.body = "Forbidden";
         return;
     }
-    // Strip "/robot/" and prepend "www/"
+    // Prepend "www"
     var file_path_buf: [256]u8 = undefined;
-    const rel_path = req.url.path[robot_prefix.len..];
-    const file_path = try std.fmt.bufPrint(&file_path_buf, "www/{s}", .{rel_path});
+    //const rel_path = req.url.path[robot_prefix.len..];
+    const file_path = try std.fmt.bufPrint(&file_path_buf, "www{s}", .{req.url.path});
     //const file_path = try std.fmt.bufPrint(&file_path_buf, "www/{s}", .{req.url.path});
-
-    var file = try std.fs.cwd().openFile(file_path, .{});
+    std.debug.print("File path: {s}\n", .{file_path});
+    var file = std.fs.cwd().openFile(file_path, .{}) catch |err| {
+        if (err == error.FileNotFound) {
+            res.status = 404;
+            res.body = "Not Found";
+        } else {
+            res.status = 500;
+            res.body = "Internal Server Error";
+        }
+        return;
+    };
     defer file.close();
-    const file_content = try file.readToEndAlloc(res.arena, 65536);
+    const file_content = file.readToEndAlloc(res.arena, 65536) catch {
+        res.status = 500;
+        res.body = "Internal Server Error";
+        return;
+    };
     res.body = file_content;
     res.status = 200;
     // Set the content type based on the file extension

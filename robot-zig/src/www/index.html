@@ -1,6 +1,8 @@
 <html>
     <head>
         <title>ROBOT</title>
+        <link rel="icon" type="image/x-icon" href="/favicon.ico">
+        <link rel="manifest" href="manifest.json" />
         <style>
             #summary {
                 font-family: monospace;
@@ -57,17 +59,24 @@
         <br />
         <br />
         <div id="time"></div>
-        <script type="text/javascript" src="script.js"></script>
+        <div id="ctrlButton"><a href="control.html"><button>CONTROL</button></a></div>
+        <script type="text/javascript" src="script.js">
+        if ('serviceWorker' in navigator) {
+          window.addEventListener('load', function() {
+            navigator.serviceWorker.register('/sw.js');
+          });
+        }
+        </script>
         <script type="text/javascript">
             const dot3 = new Intl.NumberFormat('en-US', {
-            minimumFractionDigits: 3,      
+            minimumFractionDigits: 3,
             maximumFractionDigits: 3,
             });
 
             function formatPID(value) {
                 return `Kp:${dot3.format(value.Kp)}  Ki:${dot3.format(value.Ki)}  Kd:${dot3.format(value.Kd)}`;
             }
-            // Initialize the PID values 
+            // Initialize the PID values
             refreshState();
             setTimeout(refresh, 5000);
 

@@ -37,8 +37,8 @@
     // internet connectivity.
     .dependencies = .{
         .httpz = .{
-            .url = "git+https://github.com/karlseguin/http.zig?ref=master#8ecf3a330ab1bed8495604d444e549b94f08bc0f",
-            .hash = "httpz-0.0.0-PNVzrOy2BgBA2lU1zixuVrv0UUkSnVrBUIlIHl1XV0XV",
+            .url = "git+https://github.com/karlseguin/http.zig?ref=master#2924ead41db9e1986db3b4909a82185c576f6361",
+            .hash = "httpz-0.0.0-PNVzrC7CBgDSMZNP7chgAczR3FyAz5Eum6Kb1_K9kmYR",
         },
         .websocket = .{
             .url = "git+https://github.com/karlseguin/websocket.zig?ref=master#10b0e7be2158ff22733f1e59c1ae0bace5bf3a0c",

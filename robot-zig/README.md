@@ -44,11 +44,27 @@ The build is configured to cross-compile for Raspbery Pi by default.
 It expects to find the Raspberry Pi `include` and `lib` directories.
 ```bash
 zig build
+# When building RPi 5 use this to create a binary that will run on Rpi 4
+zig build -Dcpu=cortex_a72
 ```
 
-Building for Mac OS
--------------------
-You can override the default target by setting the `target` option.
-```bash
-zig build -Dtarget=x86_64-macos
+Raspberry Pi Configuration
+--------------------------
+`/boot/firmware/config.txt` must be edited to enable SPI and I2C.
+The following lines must be added to the file:
+```
+dtparam=spi=on
+dtparam=i2c_arm=on
+```
+
+The PWM device tree overlay must be enabled and configured
+for PWM on GPIO 12 and 13.:
+```
+dtoverlay=pwm-2chan,pin=12,func=4,pin2=13,func2=4
+```
+
+On Raspberry Pi 3 you may need to disable the onboard audio driver
+as it can interfere with the PWM.
+```
+dtparam=audio=off
 ```

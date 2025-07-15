@@ -79,6 +79,8 @@ const webContext = if (twiddle) web.WebContext{
 
 pub fn main() !void {
     std.debug.print("Robots are cool.\n", .{});
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
 
     // stdout is for the actual output of your application, for example if you
     // are implementing gzip, then only the compressed bytes should be sent to
@@ -96,7 +98,7 @@ pub fn main() !void {
     try bw.flush();
 
     // start webserver
-    var server = try web.webserver(&webContext);
+    const server = try web.webserver(allocator, &webContext);
     defer {
         server.stop();
         server.deinit();

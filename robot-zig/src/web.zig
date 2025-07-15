@@ -20,7 +20,7 @@ const httpz = @import("httpz");
 const types = @import("types");
 const tts = @import("speech");
 const websocket = httpz.websocket;
-
+const Allocator = std.mem.Allocator;
 const PID_Ks = types.PID_Ks;
 const SpeakParams = struct { text: []u8 };
 const DriveParams = struct { x: f32, y: f32 };
@@ -49,14 +49,15 @@ pub const WebContext = struct {
     }
 };
 
-pub fn webserver(context: *const WebContext) !httpz.Server(*const WebContext) {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
+// alias to save a bit of typing
+const Server = httpz.Server(*const WebContext);
 
-    var server = try httpz.Server(*const WebContext).init(allocator, .{ .address = "0.0.0.0", .port = 40607 }, context);
+pub fn webserver(allocator: Allocator, context: *const WebContext) !*Server {
+    const server = try allocator.create(Server);
+    server.* = try Server.init(allocator, .{ .address = "0.0.0.0", .port = 40607 }, context);
+    //var server = try httpz.Server(*const WebContext).init(allocator, .{ .address = "0.0.0.0", .port = 40607 }, context);
 
     var router = try server.router(.{});
-
     // APIs
     router.get("/api/pidCurrent", getCurrentPID, .{});
     router.post("/api/pidStable", postStablePID, .{});

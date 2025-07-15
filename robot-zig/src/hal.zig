@@ -23,7 +23,7 @@ var pwm_period_ns: u32 = 1_000_000_000 / 20000;
 
 // Pi 5
 // Hardware PWM for motor power control
-const PWM_CHIP_PATH = "/sys/class/pwm/pwmchip0";
+const PWM_CHIP_PATH = "/sys/class/pwm/pwmchip0"; // main pwm control
 const PWM_EXPORT_PATH = PWM_CHIP_PATH ++ "/export";
 const PWM_PIN = 0; // PWM pin number on pwmchip0 (adjust as needed)
 

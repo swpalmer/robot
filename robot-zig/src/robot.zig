@@ -56,10 +56,10 @@ fn initialize_w_hal() !void {
 }
 
 fn initializePWM() !void {
-    try hal.gpioSetDirection(12, Direction.OUTPUT);
-    try hal.gpioSetDirection(13, Direction.OUTPUT);
-    try hal.gpioSetDirection(18, Direction.OUTPUT);
-    try hal.gpioSetDirection(19, Direction.OUTPUT);
+    //try hal.gpioSetDirection(12, Direction.OUTPUT);
+    //try hal.gpioSetDirection(13, Direction.OUTPUT);
+    //try hal.gpioSetDirection(18, Direction.OUTPUT);
+    //try hal.gpioSetDirection(19, Direction.OUTPUT);
     std.debug.print("PWM channel exported.\n", .{});
     try hal.pwmSetFrequency(MOTOR_CHAN_A, 20000);
     std.debug.print("PWM frequency set to 20 kHz.\n", .{});

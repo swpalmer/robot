@@ -126,6 +126,9 @@ pub fn test_loop() !void {
 }
 
 pub fn close() void {
+    defer {
+        std.debug.print("Exited BMI160 close().\n", .{});
+    }
     if (bmi160I2C) |file| {
         i2c.i2cClose(&file) catch |err| {
             std.debug.print("Error closing I2C device: {}\n", .{err});

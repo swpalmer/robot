@@ -51,6 +51,7 @@ pub const WebContext = struct {
 
 // alias to save a bit of typing
 const Server = httpz.Server(*const WebContext);
+pub var serverThread: ?std.Thread = null;
 
 pub fn webserver(allocator: Allocator, context: *const WebContext) !*Server {
     const server = try allocator.create(Server);
@@ -78,7 +79,7 @@ pub fn webserver(allocator: Allocator, context: *const WebContext) !*Server {
     //try server.listen();
 
     // non blocking...
-    _ = try server.listenInNewThread();
+    serverThread = try server.listenInNewThread();
     return server;
 }
 

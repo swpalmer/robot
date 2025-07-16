@@ -82,7 +82,12 @@ pub fn initializeIMU() !void {
 }
 
 pub fn cleanup() void {
+    defer {
+        std.debug.print("Exited lib cleanup.\n", .{});
+    }
+    std.debug.print("Entering lib cleanup.\n", .{});
     bmi160.close();
+    std.debug.print("Closing HAL...\n", .{});
     hal.close();
 }
 

@@ -77,10 +77,23 @@ const webContext = if (twiddle) web.WebContext{
     .y = &joytick_y,
 };
 
+// install a signal handler to get SIGINT and SIGTERM so we exit cleanly
+var sa: std.os.linux.Sigaction = .{
+    .handler = .{ .handler = signal_handler },
+    .mask = .{
+        0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,
+    },
+    .flags = 0,
+};
+
 pub fn main() !void {
+    defer {
+        std.debug.print("Exiting main()...\n", .{});
+    }
     std.debug.print("Robots are cool.\n", .{});
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
 
     // stdout is for the actual output of your application, for example if you
     // are implementing gzip, then only the compressed bytes should be sent to
@@ -91,46 +104,78 @@ pub fn main() !void {
 
     try stdout.print("Initializing text-to-speech...\n", .{});
     try bw.flush(); // Don't forget to flush!
-    try tts.init();
-    defer tts.deinit() catch unreachable;
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator = gpa.allocator();
+    defer _ = gpa.deinit();
+
+    //try tts.init();
+    // defer tts.close() catch |err| {
+    //     std.debug.print("Error closing text-to-speech: {}\n", .{err});
+    // };
+    try tts.init2(allocator);
+    defer tts.close2() catch |err| {
+        std.debug.print("Error closing text-to-speech: {}\n", .{err});
+    };
 
     try stdout.print("Setting up internal web server...\n", .{});
     try bw.flush();
 
+    try lib.initialize();
+    defer {
+        main_drive_motors(0, 0);
+        lib.cleanup();
+    }
+
     // start webserver
     const server = try web.webserver(allocator, &webContext);
     defer {
-        server.stop();
-        server.deinit();
-
         // ensure motors are off
-        main_drive_motors(0, 0);
+        server.stop();
+        if (web.serverThread) |thread| {
+            thread.join();
+        }
+        server.deinit();
     }
 
     try stdout.print("For now, I'm just going to try to stand up straight.\n", .{});
     try bw.flush();
 
-    try lib.initialize();
-    defer lib.cleanup();
-
     try stdout.print("\n\n\n", .{});
     try bw.flush();
 
-    while (true) {
+    std.posix.sigaction(std.os.linux.SIG.INT, &sa, null);
+    std.posix.sigaction(std.os.linux.SIG.TERM, &sa, null);
+
+    while (!volatile_should_exit.*) {
+        defer {
+            std.debug.print("Exiting main loop...\n", .{});
+        }
         try balance();
 
         // ensure motors are off
+        std.debug.print("Shutting off drive motors...\n", .{});
         main_drive_motors(0, 0);
 
+        std.debug.print("Entering sensor debug loop...\n", .{});
         try sensor_debug_loop();
     }
+}
+
+var should_exit: bool = false;
+const volatile_should_exit: *volatile bool = &should_exit;
+
+fn signal_handler(signum: i32) callconv(.C) void {
+    _ = signum; // The 'signum' parameter holds information about the signal,
+    // but we don't need it for simply setting a flag.
+    volatile_should_exit.* = true;
 }
 
 var in_sensor_debug: bool = false;
 fn sensor_debug_loop() !void {
     in_sensor_debug = true;
     const flag_ptr: *volatile bool = &in_sensor_debug;
-    while (flag_ptr.*) {
+    while (flag_ptr.* and !volatile_should_exit.*) {
         const now_us = std.time.microTimestamp();
         try lib.readSensors();
         lib.dumpSensors();
@@ -155,6 +200,9 @@ fn calibrateGyro(samples: usize) f32 {
 }
 
 fn balance() !void {
+    defer {
+        std.debug.print("Exited balance loop.\n", .{});
+    }
     var current_motor_power: f32 = 0.0;
     var last_time = std.time.microTimestamp();
 
@@ -176,7 +224,7 @@ fn balance() !void {
     //const startTime = std.time.timestamp(); // second
     //while (std.time.timestamp() - startTime < runtime) {
 
-    while (true) {
+    while (!volatile_should_exit.*) {
         const now_us = std.time.microTimestamp();
         const delta_us = @max(now_us - last_time, 1); // minimum 1 µs
         last_time = now_us;
@@ -321,7 +369,6 @@ fn balance() !void {
             std.debug.print("Compute time in balance loop was {}us\n", .{ellapsed});
         }
     }
-    std.debug.print("Exited balance loop.", .{});
 }
 
 fn lerp(a: PID_Ks, b: PID_Ks, t: f32) PID_Ks {

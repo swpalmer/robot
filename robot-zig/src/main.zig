@@ -114,9 +114,6 @@ pub fn main() !void {
         std.debug.print("Error closing text-to-speech: {}\n", .{err});
     };
 
-    // debug - wait to see output before proceeding
-    std.time.sleep(std.time.ns_per_s * 2);
-
     try stdout.print("Setting up internal web server...\n", .{});
     try bw.flush();
 
@@ -137,7 +134,7 @@ pub fn main() !void {
         server.deinit();
     }
 
-    try stdout.print("For now, I'm just going to try to stand up straight.\n", .{});
+    try tts.speak("For now, I'm just going to try to stand up straight.\n");
     try bw.flush();
 
     try stdout.print("\n\n\n", .{});

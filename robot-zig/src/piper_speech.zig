@@ -7,7 +7,6 @@ const c = @cImport({
 pub const ProcPipe = struct {
     allocator: std.mem.Allocator,
     proc1_stdin_file: *std.fs.File,
-    proc1_stdin_writer: std.io.AnyWriter,
     parent_stdin_write_fd: std.posix.fd_t, // Store file descriptor for closing
     child_pid: std.posix.pid_t, // Store PID for waiting
 
@@ -49,17 +48,17 @@ pub const ProcPipe = struct {
                 // try proc1_stdin_writer.writeAll("Can you hear me?\n"); // <-- fails
                 // try proc1_stdin_writer.writeAll("We haven't got much time.\n"); // <-- fails
 
-                var voiceBox = @This(){
+                const voiceBox = @This(){
                     .allocator = allocator,
+                    // Store the file object that holds the writer.
+                    // Note: The actual file descriptor is managed by parent_stdin_write_fd.
                     .proc1_stdin_file = proc1_pipe_file,
-                    .proc1_stdin_writer = proc1_pipe_file.writer().any(),
+                    // Get the writer from the file object.
+                    //.proc1_stdin_writer = proc1_pipe_file.writer().any(),
                     .parent_stdin_write_fd = word_pipe[1],
                     .child_pid = pid,
                 };
-                // These lines work and the output can be seen in the conole in ALL CAPS
-                try voiceBox.proc1_stdin_writer.writeAll("Hello?\nAre you there?\n"); // <-- fails
-                try voiceBox.sendData("Can you hear me?\n"); // <-- fails
-                //try proc1_stdin_writer.writeAll("We haven't got much time.\n"); // <-- fails
+
                 return voiceBox;
             },
         }
@@ -112,7 +111,8 @@ pub const ProcPipe = struct {
     /// Returns:
     ///   An error if writing fails.
     pub fn sendData(self: *@This(), data: []const u8) !void {
-        try self.proc1_stdin_writer.writeAll(data);
+        var writer = self.proc1_stdin_file.writer().any();
+        try writer.writeAll(data);
         // Note: AnyWriter doesn't have flush(), data is sent immediately
     }
 
@@ -134,29 +134,25 @@ pub fn init(allocator: std.mem.Allocator) !void {
     defer second_command.deinit();
 
     // test processes - cat to pass input on verbatim
-    try first_command.append("cat");
+    // try first_command.append("cat");
 
-    // try first_command.append("ls");
-    // try first_command.append("-al");
-    // try first_command.append("/");
-
-    try second_command.append("tr");
-    try second_command.append("a-z");
-    try second_command.append("A-Z");
+    // try second_command.append("tr");
+    // try second_command.append("a-z");
+    // try second_command.append("A-Z");
 
     // Real sub processes for piper text to speech
-    // try first_command.append("/home/pi/piper/piper");
-    // try first_command.append("-m");
-    // try first_command.append("/home/pi/voices/en_GB-cori-high.onnx");
-    // try first_command.append("--output_raw");
+    try first_command.append("/home/pi/piper/piper");
+    try first_command.append("-m");
+    try first_command.append("/home/pi/voices/en_GB-cori-high.onnx");
+    try first_command.append("--output_raw");
 
-    // try second_command.append("aplay");
-    // try second_command.append("-t");
-    // try second_command.append("raw");
-    // try second_command.append("-f");
-    // try second_command.append("S16_LE");
-    // try second_command.append("-r");
-    // try second_command.append("22050");
+    try second_command.append("aplay");
+    try second_command.append("-t");
+    try second_command.append("raw");
+    try second_command.append("-f");
+    try second_command.append("S16_LE");
+    try second_command.append("-r");
+    try second_command.append("22050");
 
     voicePipe = try allocator.create(ProcPipe);
     voicePipe.* = try ProcPipe.init(allocator, first_command, second_command);
@@ -165,9 +161,8 @@ pub fn init(allocator: std.mem.Allocator) !void {
     std.time.sleep(std.time.ns_per_s * 5);
 
     // Test sending multiple strings to see if pipeline works despite panic
-    try voicePipe.sendData("First test message\n");
-    try voicePipe.sendData("Second test message\n");
-    try voicePipe.sendData("Third test message\n");
+    try voicePipe.sendData("Hello?\n"); // <-- goes to wrong place (direct to this process stdout)
+    try voicePipe.sendData("Can you hear me?\n");
 
     std.debug.print("Multiple test messages sent to pipeline!\n", .{});
 
@@ -185,6 +180,7 @@ pub fn speak(text: [:0]const u8) !void {
     // This function should send the text to Piper for speech synthesis.
     // You can use the `piper.stdin` to write the text.
     // Example:
+    std.debug.print("ROBOT: {s}\n", .{text});
     try voicePipe.sendData(text);
     // if it wasn't newline terminated shall we send a newline?
     if (!std.mem.endsWith(u8, text, "\n")) {

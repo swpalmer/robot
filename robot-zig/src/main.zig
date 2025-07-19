@@ -109,14 +109,13 @@ pub fn main() !void {
     const allocator = gpa.allocator();
     defer _ = gpa.deinit();
 
-    //try tts.init();
-    // defer tts.close() catch |err| {
-    //     std.debug.print("Error closing text-to-speech: {}\n", .{err});
-    // };
-    try tts.init2(allocator);
-    defer tts.close2() catch |err| {
+    try tts.init(allocator);
+    defer tts.close() catch |err| {
         std.debug.print("Error closing text-to-speech: {}\n", .{err});
     };
+
+    // debug - wait to see output before proceeding
+    std.time.sleep(std.time.ns_per_s * 2);
 
     try stdout.print("Setting up internal web server...\n", .{});
     try bw.flush();

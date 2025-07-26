@@ -8,6 +8,7 @@ const lib = @import("robot_lib");
 const web = @import("robot_web");
 //const httpz = @import("httpz");
 const tts = @import("speech");
+const ollama = @import("ollama");
 
 const types = @import("types");
 const BalanceState = types.BalanceState;
@@ -102,19 +103,19 @@ pub fn main() !void {
     var bw = std.io.bufferedWriter(stdout_file);
     const stdout = bw.writer();
 
-    try stdout.print("Initializing text-to-speech...\n", .{});
-    try bw.flush(); // Don't forget to flush!
-
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
     defer _ = gpa.deinit();
+
+    try stdout.print("Initializing text-to-speech...\n", .{});
+    try bw.flush(); // Don't forget to flush!
 
     try tts.init(allocator);
     defer tts.close() catch |err| {
         std.debug.print("Error closing text-to-speech: {}\n", .{err});
     };
 
-    try stdout.print("Setting up internal web server...\n", .{});
+    try stdout.print("Setting up general I/O, sensors, and motor drivers...\n", .{});
     try bw.flush();
 
     try lib.initialize();
@@ -123,6 +124,27 @@ pub fn main() !void {
         lib.cleanup();
     }
 
+    if (true) {
+        std.debug.print("Testing BMM150\n", .{});
+        while (true) {
+            try lib.readGeomagneticSensor();
+            const raw_compass = lib.compass();
+            std.debug.print("Heading: {d: >6.2} degrees {}          \r", .{ raw_compass, lib.geomagnetic_sensor });
+            std.time.sleep(std.time.ns_per_ms * 100); // 10Hz is default configured rate for BMM150
+        }
+        return;
+    }
+
+    // try stdout.print("Initializing AI engine...\n", .{});
+    // try bw.flush(); // Don't forget to flush!
+    // try ollama.init(allocator, tts);
+    // defer ollama.deinit();
+    // try ollama.tellRobot("Hello.");
+    // if (true)
+    //     return;
+
+    try stdout.print("Setting up internal web server...\n", .{});
+    try bw.flush();
     // start webserver
     const server = try web.webserver(allocator, &webContext);
     defer {

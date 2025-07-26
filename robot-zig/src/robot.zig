@@ -4,6 +4,7 @@
 const std = @import("std");
 const halMod = @import("hal");
 const bmi160 = @import("bmi160.zig");
+const bmm150 = @import("bmm150.zig");
 const types = @import("types");
 const HAL = halMod.HAL;
 const AltMode = halMod.AltMode;
@@ -14,8 +15,10 @@ const halMode = Mode.GPIOD;
 var hal: HAL = undefined;
 const Vec3 = types.Vec3;
 
-// IMU
+// IMU (Inertial Measurement Unit - BMI160)
 pub var lmuData: types.NormalizedSensorData = undefined;
+// Compass data (Geomagnetic sensor - BMM150)
+pub var geomagnetic_sensor: bmm150.IntVec3 = undefined;
 
 // Motor control
 // PWM via two ZS-X11H modules for the main drive wheels
@@ -49,7 +52,8 @@ fn initialize_w_hal() !void {
     //const real_range = c.gpioGetPWMrealRange(12);
     //std.debug.print("Real PWM range for GPIO 12 is {}\n", .{real_range});
     try initializePWM();
-    try initializeIMU();
+    //try initializeIMU();
+    try initializeCompass();
 
     //clearScreen();
     // Setup GPIO, PWM, I2C etc
@@ -81,6 +85,13 @@ pub fn initializeIMU() !void {
     };
 }
 
+pub fn initializeCompass() !void {
+    bmm150.init(hal) catch {
+        std.debug.print("BMM150 init failed.\n", .{});
+        return error.BMM150_Initialize_Failed;
+    };
+}
+
 pub fn cleanup() void {
     defer {
         std.debug.print("Exited lib cleanup.\n", .{});
@@ -107,6 +118,17 @@ pub fn orientation() Vec3 {
     return convertStruct(Vec3, lmuData.gyro);
 }
 
+pub fn readGeomagneticSensor() !void {
+    geomagnetic_sensor = bmm150.read() catch |err| {
+        std.debug.print("Failed to read geomagnetic sensor: {}\n", .{err});
+        return;
+    };
+}
+
+pub fn compass() f32 {
+    return std.math.atan2(@as(f32, @floatFromInt(geomagnetic_sensor.y)), @as(f32, @floatFromInt(geomagnetic_sensor.x))) * (180.0 / std.math.pi);
+}
+
 pub fn tilt_angle_yz() f32 {
     return std.math.atan2(lmuData.accel.y, lmuData.accel.z) * (180.0 / std.math.pi);
 }
@@ -121,8 +143,8 @@ fn convertStruct(To: type, from: anytype) To {
 }
 
 pub fn dumpSensors() void {
-    std.debug.print("\x1b[3AAccel.X: {d: >7.4}g, Gyro.X: {d: >7.4}°/s\n", .{ lmuData.accel.x, lmuData.gyro.x });
-    std.debug.print("Accel.Y: {d: >7.4}g, Gyro.Y: {d: >7.4}°/s\n", .{ lmuData.accel.y, lmuData.gyro.y });
+    std.debug.print("\x1b[3AAccel.X: {d: >7.4}g, Gyro.X: {d: >7.4}°/s                \n", .{ lmuData.accel.x, lmuData.gyro.x });
+    std.debug.print("Accel.Y: {d: >7.4}g, Gyro.Y: {d: >7.4}°/s                   \n", .{ lmuData.accel.y, lmuData.gyro.y });
     std.debug.print("Accel.Z: {d: >7.4}g, Gyro.Z: {d: >7.4}°/s   Tilt: {d: >6.2}°\n", .{ lmuData.accel.z, lmuData.gyro.z, tilt_angle_yz() });
 }
 

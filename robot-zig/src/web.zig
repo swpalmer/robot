@@ -38,14 +38,15 @@ pub const WebContext = struct {
     y: *f32,
     pub const WebsocketHandler = WSClient;
     pub fn dispatch(self: *const WebContext, action: httpz.Action(*const WebContext), req: *httpz.Request, res: *httpz.Response) !void {
-        std.debug.print("Dispatching {} {s}...\n", .{ req.method, req.url.path });
+        //std.debug.print("Dispatching {} {s}...\n", .{ req.method, req.url.path });
         var timer = try std.time.Timer.start();
 
         // your `dispatch` doesn't _have_ to call the action
         try action(self, req, res);
 
         const elapsed = timer.lap() / 1000; // ns -> us
-        std.debug.print("Dispatched {} {s} {d}\n", .{ req.method, req.url.path, elapsed });
+        _ = elapsed;
+        //std.debug.print("Dispatched {} {s} {d}\n", .{ req.method, req.url.path, elapsed });
     }
 };
 

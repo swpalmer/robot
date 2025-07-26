@@ -6,7 +6,7 @@ const c = @cImport({
 
 pub const ProcPipe = struct {
     allocator: std.mem.Allocator,
-    proc1_stdin_file: *std.fs.File,
+    proc1_stdin_file: std.fs.File,
     parent_stdin_write_fd: std.posix.fd_t, // Store file descriptor for closing
     child_pid: std.posix.pid_t, // Store PID for waiting
 
@@ -39,9 +39,13 @@ pub const ProcPipe = struct {
                 // Create Zig I/O writer from the file descriptor
                 // that the parent will use for direct communication with the pipeline.
                 //
-                const proc1_pipe_file = try allocator.create(std.fs.File);
-                proc1_pipe_file.* = std.fs.File{ .handle = word_pipe[1] };
+                //const proc1_pipe_file = try allocator.create(std.fs.File);
+                //proc1_pipe_file.* = std.fs.File{ .handle = word_pipe[1] };
                 //const proc1_stdin_writer = proc1_stdin_file.writer().any();
+
+                const proc1_pipe_file: std.fs.File = std.fs.File{ .handle = word_pipe[1] };
+
+
 
                 // These lines work and the output can be seen in the conole in ALL CAPS
                 // try proc1_stdin_writer.writeAll("Hello?\nAre you there?\n"); // <-- fails
@@ -123,7 +127,7 @@ pub const ProcPipe = struct {
     }
 };
 
-var voicePipe: *ProcPipe = undefined;
+var voicePipe: ProcPipe = undefined;
 pub fn init(allocator: std.mem.Allocator) !void {
     std.debug.print("Initializing process pipeline...\n", .{});
 
@@ -154,8 +158,8 @@ pub fn init(allocator: std.mem.Allocator) !void {
     try second_command.append("-r");
     try second_command.append("22050");
 
-    voicePipe = try allocator.create(ProcPipe);
-    voicePipe.* = try ProcPipe.init(allocator, first_command, second_command);
+    //voicePipe = try allocator.create(ProcPipe);
+    voicePipe = try ProcPipe.init(allocator, first_command, second_command);
     std.debug.print("TTS Pipeline created successfully!\n", .{});
 
     std.time.sleep(std.time.ns_per_s * 5);

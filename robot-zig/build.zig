@@ -72,6 +72,16 @@ pub fn build(b: *std.Build) void {
     //speech_mod.linkSystemLibrary("asound", .{ .needed = true });
     //speech_mod.linkSystemLibrary("pulse-simple", .{ .needed = true });
 
+    const ollama_mod = b.createModule(.{
+        // `root_source_file` is the Zig "entry point" of the module. If a module
+        // only contains e.g. external object files, you can make this `null`.
+        // In this case the main source file is merely a path, however, in more
+        // complicated build scripts, this could be a generated file.
+        .root_source_file = b.path("src/ollama.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     // We will also create a module for our other entry point, 'main.zig'.
     const exe_mod = b.createModule(.{
         // `root_source_file` is the Zig "entry point" of the module. If a module
@@ -131,12 +141,14 @@ pub fn build(b: *std.Build) void {
     exe_mod.addImport("robot_lib", lib_mod);
     exe_mod.addImport("robot_web", web_mod);
     exe_mod.addImport("speech", speech_mod);
+    exe_mod.addImport("ollama", ollama_mod);
     exe_mod.addImport("types", types_mod);
     exe_mod.addImport("hal", hal_mod);
     lib_mod.addImport("hal", hal_mod);
     lib_mod.addImport("types", types_mod);
     web_mod.addImport("types", types_mod);
     web_mod.addImport("speech", speech_mod);
+    web_mod.addImport("ollama", ollama_mod);
 
     // Now, we will create a static library based on the module we created above.
     // This creates a `std.Build.Step.Compile`, which is the build step responsible
@@ -158,6 +170,13 @@ pub fn build(b: *std.Build) void {
         .root_module = web_mod,
     });
     b.installArtifact(web);
+
+    const ollama = b.addLibrary(.{
+        .linkage = .static,
+        .name = "ollama_web",
+        .root_module = ollama_mod,
+    });
+    b.installArtifact(ollama);
 
     const speech = b.addLibrary(.{
         .linkage = .static,

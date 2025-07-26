@@ -279,8 +279,11 @@ fn gpiodSetDirection(gpio: u8, dir: Direction) !void {
     };
 
     // set default level low
-    if (c.gpiod_line_request(line, &config, 0) != 0)
+    const set_dir_err = c.gpiod_line_request(line, &config, 0);
+    if (set_dir_err != 0) {
+        std.debug.print("Failed to set direction for GPIO {}: {}\n", .{ gpio, set_dir_err });
         return error.RequestFailed;
+    }
 }
 fn gpiodRead(gpio: u8) !u8 {
     const line = try acquireGpioLine(gpio);

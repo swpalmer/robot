@@ -12,6 +12,7 @@ orca/
 *.exe
 *.bin
 *.so
+a.out
 
 # OS generated files
 .DS_Store
